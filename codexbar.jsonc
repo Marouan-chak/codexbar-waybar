@@ -1,0 +1,21 @@
+// Waybar custom-module definition for CodexBar.
+//
+// Install:
+//   install -m 0644 codexbar.jsonc ~/.config/waybar/modules/custom-codexbar.json
+//
+// Then reference "custom/codexbar" in one of your modules-right groups
+// in ~/.config/waybar/config.jsonc, e.g.:
+//   "modules-right": ["custom/codexbar", "clock", "battery"]
+//
+// See docs/linux-waybar.md for the full walkthrough.
+{
+    "custom/codexbar": {
+        "exec": "$HOME/.config/waybar/scripts/codexbar.sh",
+        "return-type": "json",
+        "format": "{}",
+        "interval": 60,
+        "on-click": "bash -c 'notify-send -a CodexBar -t 10000 \"AI usage\" \"$($HOME/.config/waybar/scripts/codexbar.sh | jq -r .tooltip)\"'",
+        "tooltip": true,
+        "max-length": 24
+    }
+}

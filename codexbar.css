@@ -1,0 +1,36 @@
+/* CodexBar Waybar module — append to ~/.config/waybar/user-style.css
+ * or your theme's CSS. Tweak colors to taste; the four state classes
+ * (ok / warning / critical / stale) are emitted by codexbar.sh.
+ */
+
+#custom-codexbar {
+    padding: 0 8px;
+    margin: 0 4px;
+    border-radius: 6px;
+    font-weight: bold;
+}
+
+#custom-codexbar.ok {
+    color: #16d3b4;
+}
+
+#custom-codexbar.warning {
+    color: #f5a623;
+    background: alpha(#f5a623, 0.18);
+}
+
+#custom-codexbar.critical {
+    color: #ff5470;
+    background: alpha(#ff5470, 0.22);
+    animation: codexbar-pulse 2s ease-in-out infinite alternate;
+}
+
+#custom-codexbar.stale {
+    /* Latest fetch failed or the value came from the cache. */
+    color: #888;
+}
+
+@keyframes codexbar-pulse {
+    from { background: alpha(#ff5470, 0.22); }
+    to   { background: alpha(#ff5470, 0.40); }
+}
