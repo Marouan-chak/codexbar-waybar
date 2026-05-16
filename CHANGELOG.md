@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Popover **Settings…** now opens `~/.codexbar/config.json` in a real text
+  editor (VS Code → Zed → gedit → kate → …) instead of sending the JSON to
+  whatever `xdg-open` decides — which on most setups was a web browser. Falls
+  back to `$VISUAL` / `$EDITOR` in a detected terminal. Override with
+  `CODEXBAR_EDITOR`.
+
 ## [0.1.0] — 2026-05-16
 
 ### Added

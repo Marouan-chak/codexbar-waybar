@@ -123,6 +123,7 @@ definition or your shell profile.
 | `CODEXBAR_STAGGER` | `0.5` | Seconds between provider fetches (raises this if Claude OAuth keeps 429-ing). |
 | `XDG_CACHE_HOME` | `~/.cache` | Where `last.json` snapshots live. |
 | `CODEXBAR_LAYER_SHELL_LIB` | auto-detected | Override path to `libgtk4-layer-shell.so` if your distro stashes it somewhere unusual. |
+| `CODEXBAR_EDITOR` | auto-detected | Command used by the popover's **Settings…** action. Defaults to the first GUI text editor it finds (VS Code, Zed, gedit, kate, …) and falls back to `$VISUAL` / `$EDITOR` in a detected terminal. Set to e.g. `nvim` or `code` to force a specific editor. |
 
 To change which providers appear, edit `PROVIDERS=( … )` and `SOURCE_OVERRIDES`
 at the top of `codexbar.sh`. Codex and Claude need `--source oauth` on Linux
