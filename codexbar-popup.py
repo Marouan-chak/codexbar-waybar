@@ -12,6 +12,7 @@ instant paint, then refetches in the background.
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import signal
@@ -378,6 +379,10 @@ _RESET_SPACE_AFTER = re.compile(r"^([Rr]esets)(?=\S)")
 _RESET_SPACE_BEFORE_PAREN = re.compile(r"(?<=\S)\(")
 _RESET_SPACE_AFTER_COMMA = re.compile(r",(?=\S)")
 _RESET_SPACE_BEFORE_AMPM = re.compile(r"(?<=\d)(?=[AaPp][Mm]\b)")
+_RESET_STARTS_WITH_RESETS = re.compile(r"^[Rr]esets")
+_RESET_RELATIVE = re.compile(r"^[Rr]esets in ")
+
+RESET_FORMATS = ("provider", "local", "utc")
 
 
 def normalize_reset_description(text: str) -> str:
@@ -391,6 +396,61 @@ def normalize_reset_description(text: str) -> str:
     text = _RESET_SPACE_AFTER_COMMA.sub(", ", text)
     text = _RESET_SPACE_BEFORE_AMPM.sub(" ", text)
     return text
+
+
+def current_reset_format(state: dict | None = None) -> str:
+    """Resolve the active reset time format. Env var overrides state.json;
+    unknown values fall back to `provider` (current behavior)."""
+    env = os.environ.get("CODEXBAR_RESET_TIME_FORMAT")
+    if env in RESET_FORMATS:
+        return env
+    if state is None:
+        state = load_state()
+    value = state.get("resetTimeFormat")
+    return value if value in RESET_FORMATS else "provider"
+
+
+def _from_description(desc: str) -> str:
+    if not desc:
+        return ""
+    return desc if _RESET_STARTS_WITH_RESETS.match(desc) else f"Resets {desc}"
+
+
+def format_reset_label(window: dict, mode: str) -> str:
+    """Render the reset label for a usage window in the chosen format.
+
+    Mirrors `reset_phrase` in codexbar.sh so the popover and tooltip never
+    drift. Returns a string like "Resets 6:12 PM CDT" or "" for no info.
+    Relative phrases ("Resets in 2 hours") are preserved even in absolute
+    modes, since "in 2 hours" is more useful than a wall-clock time.
+    """
+    clean = normalize_reset_description(window.get("resetDescription") or "")
+    from_desc = _from_description(clean)
+    if mode == "provider":
+        return from_desc
+    if _RESET_RELATIVE.match(clean):
+        return from_desc
+    resets_at = window.get("resetsAt")
+    if not resets_at:
+        return from_desc
+    try:
+        ts = datetime.datetime.fromisoformat(resets_at.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return from_desc
+    if mode == "utc":
+        ts = ts.astimezone(datetime.timezone.utc)
+        tz_suffix = "UTC"
+    else:
+        ts = ts.astimezone()
+        tz_suffix = ts.tzname() or ""
+    now = datetime.datetime.now(ts.tzinfo)
+    if ts.date() == now.date():
+        body = ts.strftime("%-I:%M %p")
+    elif ts.year == now.year:
+        body = ts.strftime("%b %-d at %-I:%M %p")
+    else:
+        body = ts.strftime("%b %-d %Y at %-I:%M %p")
+    return f"Resets {body} {tz_suffix}".rstrip()
 
 
 def fetch_fresh() -> list:
@@ -701,6 +761,22 @@ class CodexBarPopup(Gtk.Application):
         # Divider between sections.
         self.body.append(self._divider())
 
+        # --- Section: reset time format ---
+        reset_title = Gtk.Label(label="Reset times", xalign=0.0)
+        reset_title.add_css_class("codexbar-section-title")
+        self.body.append(reset_title)
+        reset_hint = Gtk.Label(
+            label="How to render the “Resets …” label. Provider keeps the raw "
+                  "string each backend emits; Local/UTC reformat the reset "
+                  "timestamp with an explicit timezone.",
+            xalign=0.0, wrap=True, max_width_chars=44)
+        reset_hint.add_css_class("codexbar-subtitle")
+        self.body.append(reset_hint)
+        self.body.append(self._build_reset_format_picker())
+
+        # Divider between sections.
+        self.body.append(self._divider())
+
         # --- Section: enabled providers ---
         section_title = Gtk.Label(label="Providers", xalign=0.0)
         section_title.add_css_class("codexbar-section-title")
@@ -777,6 +853,36 @@ class CodexBarPopup(Gtk.Application):
         # Re-render so the active chip highlight tracks the click.
         self.render()
         # Nudge waybar so the bar text updates immediately.
+        subprocess.Popen(["pkill", "-RTMIN+8", "waybar"])
+
+    def _build_reset_format_picker(self) -> Gtk.Widget:
+        wrap = Gtk.FlowBox()
+        wrap.add_css_class("codexbar-bar-picker")
+        wrap.set_selection_mode(Gtk.SelectionMode.NONE)
+        wrap.set_homogeneous(False)
+        wrap.set_max_children_per_line(8)
+        current = current_reset_format()
+        labels = (("provider", "Provider"), ("local", "Local"), ("utc", "UTC"))
+        for value, label in labels:
+            classes = ["codexbar-tab"]
+            if value == current:
+                classes.append("active")
+            wrap.append(self._make_pill(
+                label, classes,
+                lambda v=value: self._on_reset_format_change(v)))
+        return wrap
+
+    def _on_reset_format_change(self, value: str):
+        state = load_state()
+        if value == "provider":
+            state.pop("resetTimeFormat", None)
+        else:
+            state["resetTimeFormat"] = value
+        save_state(state)
+        # Re-render the Settings view so the chip highlight tracks the click,
+        # and signal waybar so the tooltip picks up the new format on its
+        # next refresh.
+        self.render()
         subprocess.Popen(["pkill", "-RTMIN+8", "waybar"])
 
     def _settings_row(self, pid: str, enabled: bool, *, enabled_ui: bool) -> Gtk.Widget:
@@ -925,9 +1031,8 @@ class CodexBarPopup(Gtk.Application):
         left.add_css_class("codexbar-section-detail-left")
         details.append(left)
 
-        reset = normalize_reset_description(window.get("resetDescription") or "")
-        if reset:
-            reset_text = reset if reset.lower().startswith("reset") else f"Resets {reset}"
+        reset_text = format_reset_label(window, current_reset_format())
+        if reset_text:
             r = Gtk.Label(label=reset_text, xalign=1.0)
             r.add_css_class("codexbar-section-detail-right")
             details.append(r)
