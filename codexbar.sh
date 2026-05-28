@@ -219,19 +219,41 @@ for p in "${PROVIDERS[@]}"; do
 done
 merged+="]"
 
-# Fill in errored providers with the last successful snapshot (marks them stale).
-if [[ -f "$LAST_GOOD" ]] && [[ "$merged" != "[]" ]]; then
-    merged="$(jq -c --argjson prev "$(cat "$LAST_GOOD")" '
-        ([$prev[]? | select(.error | not) | {key: .provider, value: .}] | from_entries) as $ok_prev
-        | map(if .error and $ok_prev[.provider]
-              then $ok_prev[.provider] + {stale: true}
-              else . end)
-    ' <<< "$merged")"
+# Persist fresh successful provider snapshots without dropping older successful
+# entries for providers that failed this refresh.
+if [[ "$merged" != "[]" ]] && echo "$merged" | jq -e 'any(.error | not)' >/dev/null 2>&1; then
+    if [[ -f "$LAST_GOOD" ]]; then
+        merged_for_cache="$(jq -c --argjson prev "$(cat "$LAST_GOOD")" '
+            ([$prev[]? | select((.error | not) and (.stale != true))
+              | {key: .provider, value: .}] | from_entries) as $ok_prev
+            | ([.[]? | select(.error | not)
+              | {key: .provider, value: (del(.stale))}] | from_entries) as $ok_fresh
+            | ($ok_prev + $ok_fresh) | [.[]]
+        ' <<< "$merged")"
+        echo "$merged_for_cache" > "$LAST_GOOD"
+    else
+        echo "$merged" | jq -c 'map(select(.error | not) | del(.stale))' > "$LAST_GOOD"
+    fi
 fi
 
-# Persist snapshot if at least one provider succeeded.
-if [[ "$merged" != "[]" ]] && echo "$merged" | jq -e 'any(.error | not)' >/dev/null 2>&1; then
-    echo "$merged" > "$LAST_GOOD"
+# Fill in errored or missing providers with the last successful snapshot for
+# display (marks them stale). Missing happens when a provider returns
+# empty/invalid output instead of a JSON array.
+if [[ -f "$LAST_GOOD" ]]; then
+    providers_json="$(printf '%s\n' "${PROVIDERS[@]}" | jq -R . | jq -s .)"
+    merged="$(jq -c \
+        --argjson prev "$(cat "$LAST_GOOD")" \
+        --argjson requested "$providers_json" '
+        ([$prev[]? | select(.error | not) | {key: .provider, value: .}] | from_entries) as $ok_prev
+        | (map(.provider) | unique) as $seen
+        | map(if .error and $ok_prev[.provider]
+              then $ok_prev[.provider] + {stale: true}
+              else . end) as $current
+        | ($requested
+           | map(. as $pid | select(($seen | index($pid)) | not))
+           | map($ok_prev[.]? | select(. != null) + {stale: true})) as $missing
+        | $current + $missing
+    ' <<< "$merged")"
 fi
 
 if [[ "$merged" == "[]" ]]; then
