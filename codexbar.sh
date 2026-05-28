@@ -297,8 +297,9 @@ echo "$merged" | jq -c \
              | if $reset_format == "provider" then $from_desc
                elif ($clean | test("^[Rr]esets in ")) then $from_desc
                elif w.resetsAt != null then
-                   (w.resetsAt | fromdateiso8601) as $ts
-                   | if $reset_format == "utc" then " — resets \($ts | fmt_utc_ts)"
+                   (try (w.resetsAt | fromdateiso8601) catch null) as $ts
+                   | if $ts == null then $from_desc
+                     elif $reset_format == "utc" then " — resets \($ts | fmt_utc_ts)"
                      else " — resets \($ts | fmt_local_ts)" end
                else $from_desc
                end
