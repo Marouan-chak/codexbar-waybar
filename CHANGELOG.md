@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-31
+
 ### Added
 - **Reset time format picker.** A new `resetTimeFormat` setting (`provider`,
   `local`, or `utc`) controls how the "Resets ..." line in both the tooltip and
@@ -19,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CODEXBAR_RESET_TIME_FORMAT` env var. Useful when the provider's
   description is timezone-ambiguous -- for example Codex emits `"7:10 AM"`
   for a `resetsAt` that's actually in UTC.
+
+### Fixed
+- **Cached provider visibility.** The wrapper now keeps the last successful
+  provider snapshot visible as stale when a requested provider returns empty,
+  invalid, or errored output, instead of dropping it from the tooltip during
+  transient refresh failures.
 
 ## [0.2.1] — 2026-05-30
 
@@ -103,7 +111,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Waybar entry.
 - `install.sh` — idempotent installer.
 
-[Unreleased]: https://github.com/Marouan-chak/codexbar-waybar/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/Marouan-chak/codexbar-waybar/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Marouan-chak/codexbar-waybar/releases/tag/v0.3.0
 [0.2.1]: https://github.com/Marouan-chak/codexbar-waybar/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Marouan-chak/codexbar-waybar/releases/tag/v0.2.0
 [0.1.1]: https://github.com/Marouan-chak/codexbar-waybar/releases/tag/v0.1.1
