@@ -161,6 +161,7 @@ definition or your shell profile.
 | `CODEXBAR_PROVIDERS` | from `config.json` | Space-separated provider IDs to query, bypassing `~/.codexbar/config.json`. Set per-Waybar instance if you want different sets per monitor. |
 | `CODEXBAR_BAR_PROVIDER` | from `state.json` | Pin a specific provider's session/weekly to the bar regardless of state. Set to a provider ID, or unset for `Highest`. |
 | `CODEXBAR_ANTIGRAVITY_CREDS` | `~/.gemini/oauth_creds.json` | Path to the Antigravity Google OAuth creds (written by `agy login`) the wrapper feeds to the CLI. |
+| `CODEXBAR_RESET_TIME_FORMAT` | from `state.json` | Reset-time rendering mode: `provider` (use the provider's `resetDescription` as-is, default), `local` (reformat `resetsAt` in the system timezone with a TZ suffix), or `utc` (same tiering, in UTC). The popover's Settings view exposes the same toggle. |
 | `CODEXBAR_LAYER_SHELL_LIB` | auto-detected | Override path to `libgtk4-layer-shell.so` if your distro stashes it somewhere unusual. |
 | `XDG_CACHE_HOME` | `~/.cache` | Where `last.json` snapshots live. |
 | `XDG_DATA_HOME` | `~/.local/share` | Where provider icons live (under `codexbar-waybar/icons/`). |

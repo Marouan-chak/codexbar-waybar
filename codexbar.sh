@@ -23,10 +23,25 @@ mkdir -p "$CACHE_DIR"
 # Per-instance bar provider selection (written by the popup's Settings view).
 # `null` (or unset) means "show the highest used% across providers".
 BAR_PROVIDER=""
+# How to render reset times in the tooltip / popover:
+#   provider — use the provider's `resetDescription` as-is (default; backward
+#              compatible — Claude OAuth gives "May 17 at 6:20AM" with no TZ,
+#              Codex gives "7:10 AM" in UTC with no TZ marker, etc.)
+#   local    — format `resetsAt` (ISO 8601 UTC) in the system local timezone
+#              with a today / this-year / future-year tier and a TZ suffix
+#   utc      — same tiering, formatted in UTC with a literal "UTC" suffix
+RESET_TIME_FORMAT="provider"
 if [[ -f "$STATE_PATH" ]] && command -v jq >/dev/null 2>&1; then
     BAR_PROVIDER="$(jq -r '.barProvider // empty' "$STATE_PATH" 2>/dev/null)"
+    rf="$(jq -r '.resetTimeFormat // empty' "$STATE_PATH" 2>/dev/null)"
+    [[ -n "$rf" ]] && RESET_TIME_FORMAT="$rf"
 fi
 [[ -n "${CODEXBAR_BAR_PROVIDER:-}" ]] && BAR_PROVIDER="$CODEXBAR_BAR_PROVIDER"
+[[ -n "${CODEXBAR_RESET_TIME_FORMAT:-}" ]] && RESET_TIME_FORMAT="$CODEXBAR_RESET_TIME_FORMAT"
+case "$RESET_TIME_FORMAT" in
+    provider|local|utc) ;;
+    *) RESET_TIME_FORMAT="provider" ;;
+esac
 
 # Read enabled providers from the codexbar CLI's config, fall back to a
 # sensible default if it's missing or unreadable. Override with the
@@ -204,19 +219,41 @@ for p in "${PROVIDERS[@]}"; do
 done
 merged+="]"
 
-# Fill in errored providers with the last successful snapshot (marks them stale).
-if [[ -f "$LAST_GOOD" ]] && [[ "$merged" != "[]" ]]; then
-    merged="$(jq -c --argjson prev "$(cat "$LAST_GOOD")" '
-        ([$prev[]? | select(.error | not) | {key: .provider, value: .}] | from_entries) as $ok_prev
-        | map(if .error and $ok_prev[.provider]
-              then $ok_prev[.provider] + {stale: true}
-              else . end)
-    ' <<< "$merged")"
+# Persist fresh successful provider snapshots without dropping older successful
+# entries for providers that failed this refresh.
+if [[ "$merged" != "[]" ]] && echo "$merged" | jq -e 'any(.error | not)' >/dev/null 2>&1; then
+    if [[ -f "$LAST_GOOD" ]]; then
+        merged_for_cache="$(jq -c --argjson prev "$(cat "$LAST_GOOD")" '
+            ([$prev[]? | select((.error | not) and (.stale != true))
+              | {key: .provider, value: .}] | from_entries) as $ok_prev
+            | ([.[]? | select(.error | not)
+              | {key: .provider, value: (del(.stale))}] | from_entries) as $ok_fresh
+            | ($ok_prev + $ok_fresh) | [.[]]
+        ' <<< "$merged")"
+        echo "$merged_for_cache" > "$LAST_GOOD"
+    else
+        echo "$merged" | jq -c 'map(select(.error | not) | del(.stale))' > "$LAST_GOOD"
+    fi
 fi
 
-# Persist snapshot if at least one provider succeeded.
-if [[ "$merged" != "[]" ]] && echo "$merged" | jq -e 'any(.error | not)' >/dev/null 2>&1; then
-    echo "$merged" > "$LAST_GOOD"
+# Fill in errored or missing providers with the last successful snapshot for
+# display (marks them stale). Missing happens when a provider returns
+# empty/invalid output instead of a JSON array.
+if [[ -f "$LAST_GOOD" ]]; then
+    providers_json="$(printf '%s\n' "${PROVIDERS[@]}" | jq -R . | jq -s .)"
+    merged="$(jq -c \
+        --argjson prev "$(cat "$LAST_GOOD")" \
+        --argjson requested "$providers_json" '
+        ([$prev[]? | select(.error | not) | {key: .provider, value: .}] | from_entries) as $ok_prev
+        | (map(.provider) | unique) as $seen
+        | map(if .error and $ok_prev[.provider]
+              then $ok_prev[.provider] + {stale: true}
+              else . end) as $current
+        | ($requested
+           | map(. as $pid | select(($seen | index($pid)) | not))
+           | map($ok_prev[.]? | select(. != null) + {stale: true})) as $missing
+        | $current + $missing
+    ' <<< "$merged")"
 fi
 
 if [[ "$merged" == "[]" ]]; then
@@ -224,7 +261,10 @@ if [[ "$merged" == "[]" ]]; then
     exit 0
 fi
 
-echo "$merged" | jq -c --arg now "$(date -u +%FT%TZ)" --arg bar_provider "$BAR_PROVIDER" '
+echo "$merged" | jq -c \
+    --arg now "$(date -u +%FT%TZ)" \
+    --arg bar_provider "$BAR_PROVIDER" \
+    --arg reset_format "$RESET_TIME_FORMAT" '
     # Collect all usage windows across providers
     def provider_name(p):
         {codex:"Codex", claude:"Claude", gemini:"Gemini",
@@ -242,16 +282,54 @@ echo "$merged" | jq -c --arg now "$(date -u +%FT%TZ)" --arg bar_provider "$BAR_P
         | gsub(",(?=\\S)"; ", ")
         | gsub("(?<=\\d)(?=[AaPp][Mm]\\b)"; " ");
 
-    def reset_phrase(d):
-        if d == null then ""
-        else (d | normalize_reset) as $clean
-             | if ($clean | test("^[Rr]esets")) then " — \($clean)"
-               else " — resets \($clean)" end
+    # Format a UNIX timestamp in the system local timezone, tiered by how far
+    # away the reset is. Today drops the date; this year drops the year.
+    def fmt_local_ts:
+        . as $ts
+        | ($ts | strflocaltime("%Y-%m-%d")) as $rd
+        | (now | strflocaltime("%Y-%m-%d")) as $td
+        | ($ts | strflocaltime("%Y")) as $ry
+        | (now | strflocaltime("%Y")) as $cy
+        | if $rd == $td then ($ts | strflocaltime("%-I:%M %p %Z"))
+          elif $ry == $cy then ($ts | strflocaltime("%b %-d at %-I:%M %p %Z"))
+          else ($ts | strflocaltime("%b %-d %Y at %-I:%M %p %Z")) end;
+
+    # Same tiering, formatted in UTC. We hardcode the "UTC" suffix because
+    # `strftime("%Z")` after `gmtime` is empty on some libc builds.
+    def fmt_utc_ts:
+        . as $ts
+        | ($ts | gmtime | strftime("%Y-%m-%d")) as $rd
+        | (now | gmtime | strftime("%Y-%m-%d")) as $td
+        | ($ts | gmtime | strftime("%Y")) as $ry
+        | (now | gmtime | strftime("%Y")) as $cy
+        | if $rd == $td then ($ts | gmtime | strftime("%-I:%M %p UTC"))
+          elif $ry == $cy then ($ts | gmtime | strftime("%b %-d at %-I:%M %p UTC"))
+          else ($ts | gmtime | strftime("%b %-d %Y at %-I:%M %p UTC")) end;
+
+    # Build the trailing " — resets …" fragment for a usage window. Mode is
+    # one of "provider" (preserve the provider string), "local", or "utc".
+    # Relative phrases like "Resets in 2 hours" are kept verbatim even in
+    # absolute modes — "in 2 hours" is more useful than a wall-clock time.
+    def reset_phrase(w):
+        if w == null then ""
+        else (w.resetDescription // "" | normalize_reset) as $clean
+             | (if $clean == "" then ""
+                elif ($clean | test("^[Rr]esets")) then " — \($clean)"
+                else " — resets \($clean)" end) as $from_desc
+             | if $reset_format == "provider" then $from_desc
+               elif ($clean | test("^[Rr]esets in ")) then $from_desc
+               elif w.resetsAt != null then
+                   (try (w.resetsAt | fromdateiso8601) catch null) as $ts
+                   | if $ts == null then $from_desc
+                     elif $reset_format == "utc" then " — resets \($ts | fmt_utc_ts)"
+                     else " — resets \($ts | fmt_local_ts)" end
+               else $from_desc
+               end
         end;
 
     def fmt_window(w; name):
         if w == null or w.usedPercent == null then empty
-        else "\(name): \(w.usedPercent)%" + reset_phrase(w.resetDescription)
+        else "\(name): \(w.usedPercent)%" + reset_phrase(w)
         end;
 
     def provider_lines(entry):

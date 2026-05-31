@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Reset time format picker.** A new `resetTimeFormat` setting (`provider`,
+  `local`, or `utc`) controls how the "Resets ..." line in both the tooltip and
+  the popover is rendered. Provider keeps the upstream string as-is (default,
+  no behavior change on upgrade); Local reformats `resetsAt` in the system
+  timezone with an explicit TZ suffix; UTC does the same with a literal "UTC".
+  All three modes tier the format by proximity (today drops the date,
+  this-year drops the year). Configurable from the popover's Settings view,
+  via `~/.config/codexbar-waybar/state.json`, or per-instance with the
+  `CODEXBAR_RESET_TIME_FORMAT` env var. Useful when the provider's
+  description is timezone-ambiguous -- for example Codex emits `"7:10 AM"`
+  for a `resetsAt` that's actually in UTC.
+
 ## [0.2.1] — 2026-05-30
 
 ### Fixed
