@@ -198,51 +198,69 @@ for p in "${PROVIDERS[@]}"; do
     i=$((i + 1))
 done
 
+append_merged_entry() {
+    local entry="$1"
+    [[ -z "$entry" ]] && return
+    if (( first )); then
+        merged+="$entry"
+        first=0
+    else
+        merged+=",$entry"
+    fi
+}
+
 merged="["
 first=1
 for p in "${PROVIDERS[@]}"; do
     body="$(cat "$tmpdir/$p.json")"
     # CLI returns a JSON array; unwrap and append elements.
-    if [[ -z "$body" ]] || ! echo "$body" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    if [[ -z "$body" ]]; then
+        continue
+    fi
+    if ! echo "$body" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        append_merged_entry "$(jq -cn \
+            --arg provider "$p" \
+            --arg message "invalid JSON from provider" \
+            '{provider: $provider, error: {message: $message}}')"
         continue
     fi
     inner="$(echo "$body" | jq -c '.[]')"
     while IFS= read -r entry; do
-        [[ -z "$entry" ]] && continue
-        if (( first )); then
-            merged+="$entry"
-            first=0
-        else
-            merged+=",$entry"
-        fi
+        append_merged_entry "$entry"
     done <<< "$inner"
 done
 merged+="]"
 
+last_good_json=""
+if [[ -f "$LAST_GOOD" ]]; then
+    last_good_json="$(jq -c 'select(type == "array")' "$LAST_GOOD" 2>/dev/null || true)"
+fi
+
 # Persist fresh successful provider snapshots without dropping older successful
 # entries for providers that failed this refresh.
 if [[ "$merged" != "[]" ]] && echo "$merged" | jq -e 'any(.error | not)' >/dev/null 2>&1; then
-    if [[ -f "$LAST_GOOD" ]]; then
-        merged_for_cache="$(jq -c --argjson prev "$(cat "$LAST_GOOD")" '
+    if [[ -n "$last_good_json" ]]; then
+        merged_for_cache="$(jq -c --argjson prev "$last_good_json" '
             ([$prev[]? | select((.error | not) and (.stale != true))
               | {key: .provider, value: .}] | from_entries) as $ok_prev
             | ([.[]? | select(.error | not)
-              | {key: .provider, value: (del(.stale))}] | from_entries) as $ok_fresh
+            | {key: .provider, value: (del(.stale))}] | from_entries) as $ok_fresh
             | ($ok_prev + $ok_fresh) | [.[]]
         ' <<< "$merged")"
-        echo "$merged_for_cache" > "$LAST_GOOD"
+        [[ -n "$merged_for_cache" ]] && echo "$merged_for_cache" > "$LAST_GOOD"
     else
         echo "$merged" | jq -c 'map(select(.error | not) | del(.stale))' > "$LAST_GOOD"
     fi
+    last_good_json="$(jq -c 'select(type == "array")' "$LAST_GOOD" 2>/dev/null || true)"
 fi
 
 # Fill in errored or missing providers with the last successful snapshot for
-# display (marks them stale). Missing happens when a provider returns
-# empty/invalid output instead of a JSON array.
-if [[ -f "$LAST_GOOD" ]]; then
+# display (marks them stale). Missing happens when a provider returns empty
+# output instead of a JSON array.
+if [[ -n "$last_good_json" ]]; then
     providers_json="$(printf '%s\n' "${PROVIDERS[@]}" | jq -R . | jq -s .)"
     merged="$(jq -c \
-        --argjson prev "$(cat "$LAST_GOOD")" \
+        --argjson prev "$last_good_json" \
         --argjson requested "$providers_json" '
         ([$prev[]? | select(.error | not) | {key: .provider, value: .}] | from_entries) as $ok_prev
         | (map(.provider) | unique) as $seen
