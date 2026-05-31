@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Provider JSON isolation.** Invalid JSON from one provider is now surfaced
+  as that provider's error instead of breaking the whole Waybar payload. Corrupt
+  `last.json` cache files are ignored instead of poisoning future refreshes.
+
 ## [0.3.0] — 2026-05-31
 
 ### Added
