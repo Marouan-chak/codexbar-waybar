@@ -169,7 +169,7 @@ fetch_provider() {
     local primary="${SOURCE_OVERRIDES[$p]:-}"
     local fallback="${FALLBACK_SOURCES[$p]:-}"
 
-    local body
+    local body fallback_body
     body="$(fetch_one "$p" "$primary")"
 
     # Only retry when the response is a valid array with a provider-level
@@ -178,7 +178,10 @@ fetch_provider() {
     # because the cache layer will mask it.
     if [[ -n "$fallback" ]] \
         && echo "$body" | jq -e 'type == "array" and (.[0].error // null) != null' >/dev/null 2>&1; then
-        body="$(fetch_one "$p" "$fallback")"
+        fallback_body="$(fetch_one "$p" "$fallback")"
+        if echo "$fallback_body" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            body="$fallback_body"
+        fi
     fi
 
     echo "$body"

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Claude CLI fallback output is validated before replacing the OAuth response;
+  empty or invalid fallback output leaves the OAuth error for cache handling.
+
 ### Fixed
 - **Provider JSON isolation.** Invalid JSON from one provider is now surfaced
   as that provider's error instead of breaking the whole Waybar payload. Corrupt
