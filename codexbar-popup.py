@@ -50,6 +50,7 @@ from gi.repository import GLib, Gtk, Gtk4LayerShell  # noqa: E402
 
 CODEXBAR = os.environ.get("CODEXBAR_BIN", str(Path.home() / ".local/bin/codexbar"))
 CACHE = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "codexbar-waybar"
+CURRENT = CACHE / "current.json"
 LAST_GOOD = CACHE / "last.json"
 SCRIPT_DIR = Path(__file__).resolve().parent
 WRAPPER = SCRIPT_DIR / "codexbar.sh"
@@ -205,7 +206,7 @@ window.codexbar-popup {
     border-radius: 14px;
     border: 1px solid @codexbar_border;
     padding: 0;
-    min-width: 360px;
+    min-width: 420px;
 }
 
 /* Force every child of the root to inherit the panel (Adwaita ships a lot
@@ -261,6 +262,7 @@ window.codexbar-popup {
 .codexbar-body {
     background-color: @codexbar_panel_bg;
     padding: 14px 18px 6px 18px;
+    min-height: 360px;
 }
 
 .codexbar-provider-title {
@@ -408,11 +410,14 @@ def build_css(color_scheme: str) -> bytes:
 
 
 def load_cached() -> list:
-    if LAST_GOOD.exists():
+    for path in (CURRENT, LAST_GOOD):
+        if not path.exists():
+            continue
         try:
-            return json.loads(LAST_GOOD.read_text())
+            data = json.loads(path.read_text())
+            return data if isinstance(data, list) else []
         except json.JSONDecodeError:
-            return []
+            continue
     return []
 
 
@@ -739,6 +744,7 @@ class CodexBarPopup(Gtk.Application):
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         root.add_css_class("codexbar-root")
+        root.set_size_request(420, -1)
         win.set_child(root)
 
         self.tabbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
@@ -747,6 +753,7 @@ class CodexBarPopup(Gtk.Application):
 
         self.body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.body.add_css_class("codexbar-body")
+        self.body.set_size_request(-1, 360)
         root.append(self.body)
 
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)

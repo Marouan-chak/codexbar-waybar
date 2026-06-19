@@ -21,6 +21,7 @@ CONFIG_PATH="${HOME}/.codexbar/config.json"
 STATE_PATH="${XDG_CONFIG_HOME:-${HOME}/.config}/codexbar-waybar/state.json"
 CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/codexbar-waybar"
 mkdir -p "$CACHE_DIR"
+CURRENT_JSON="$CACHE_DIR/current.json"
 
 # Per-instance bar provider selection (written by the popup's Settings view).
 # `null` (or unset) means "show the highest used% across providers".
@@ -292,6 +293,10 @@ if [[ -n "$last_good_json" ]]; then
            | map($ok_prev[.]? | select(. != null) + {stale: true})) as $missing
         | $current + $missing
     ' <<< "$merged")"
+fi
+
+if echo "$merged" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    echo "$merged" > "$CURRENT_JSON"
 fi
 
 if [[ "$merged" == "[]" ]]; then
