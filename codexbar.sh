@@ -17,6 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CODEXBAR="${CODEXBAR_BIN:-${HOME}/.local/bin/codexbar}"
 COMMANDCODE_HELPER="${SCRIPT_DIR}/codexbar-commandcode-api.py"
 OPENCODEGO_HELPER="${SCRIPT_DIR}/codexbar-opencodego-local.py"
+PROVIDER_TIMEOUT_SECS="${CODEXBAR_PROVIDER_TIMEOUT:-15}"
 CONFIG_PATH="${HOME}/.codexbar/config.json"
 STATE_PATH="${XDG_CONFIG_HOME:-${HOME}/.config}/codexbar-waybar/state.json"
 CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/codexbar-waybar"
@@ -166,20 +167,24 @@ fetch_one() {
 
     local args=(usage --provider "$p" --format json --no-color)
     [[ -n "$src" ]] && args+=(--source "$src")
+    local cmd=("$CODEXBAR" "${args[@]}")
+    if command -v timeout >/dev/null 2>&1; then
+        cmd=(timeout --kill-after=2s "${PROVIDER_TIMEOUT_SECS}s" "${cmd[@]}")
+    fi
     if [[ "$p" == "antigravity" ]]; then
         if [[ -z "${ANTIGRAVITY_OAUTH_CREDENTIALS_JSON:-}" && -f "$ANTIGRAVITY_CREDS" ]]; then
             CUSTOM_CA_BUNDLE="${ANTIGRAVITY_CUSTOM_CA_BUNDLE:-}" \
             LD_PRELOAD="${ANTIGRAVITY_LD_PRELOAD:-}" \
             ANTIGRAVITY_OAUTH_CREDENTIALS_JSON="$(cat "$ANTIGRAVITY_CREDS")" \
-                "$CODEXBAR" "${args[@]}" 2>/dev/null
+                "${cmd[@]}" 2>/dev/null
         else
             CUSTOM_CA_BUNDLE="${ANTIGRAVITY_CUSTOM_CA_BUNDLE:-}" \
             LD_PRELOAD="${ANTIGRAVITY_LD_PRELOAD:-}" \
-                "$CODEXBAR" "${args[@]}" 2>/dev/null
+                "${cmd[@]}" 2>/dev/null
         fi
         return
     fi
-    "$CODEXBAR" "${args[@]}" 2>/dev/null
+    "${cmd[@]}" 2>/dev/null
 }
 
 fetch_provider() {
@@ -189,6 +194,13 @@ fetch_provider() {
 
     local body fallback_body
     body="$(fetch_one "$p" "$primary")"
+
+    if [[ -z "$body" && -n "$fallback" && "$fallback" != "$primary" ]]; then
+        fallback_body="$(fetch_one "$p" "$fallback")"
+        if echo "$fallback_body" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            body="$fallback_body"
+        fi
+    fi
 
     # Only retry when the response is a valid array with a provider-level
     # error — network failures and rate limits land here. Auth misconfig
@@ -200,6 +212,13 @@ fetch_provider() {
         if echo "$fallback_body" | jq -e 'type == "array"' >/dev/null 2>&1; then
             body="$fallback_body"
         fi
+    fi
+
+    if [[ -z "$body" ]]; then
+        body="$(jq -cn \
+            --arg provider "$p" \
+            --arg message "provider timed out or returned no data" \
+            '[{provider: $provider, error: {kind: "provider", code: 124, message: $message}}]')"
     fi
 
     echo "$body"
