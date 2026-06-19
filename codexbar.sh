@@ -291,7 +291,8 @@ echo "$merged" | jq -c \
         {codex:"Codex", claude:"Claude", gemini:"Gemini",
          copilot:"Copilot", openai:"OpenAI", cursor:"Cursor",
          vertexai:"Vertex AI", openrouter:"OpenRouter",
-         antigravity:"Antigravity"}[p] // (p | ascii_upcase);
+         antigravity:"Antigravity", grok:"Grok",
+         commandcode:"Command Code", opencodego:"OpenCode Go"}[p] // (p | ascii_upcase);
 
     # Insert spaces the providers omit. Claude OAuth gives "May 17 at 6:20AM"
     # (no space before AM/PM); Claude CLI gives "Resets6:20am(Europe/Paris)"

@@ -33,14 +33,21 @@ compositor with Waybar + gtk4-layer-shell.
 ## Features
 
 - **Provider logos** in the tab strip and settings rows, sourced from
-  upstream CodexBar (39 brand marks). Auto-recoloured for light backgrounds;
+  upstream CodexBar (39 brand marks). Auto-recoloured for the popup theme;
   see [`assets/providers/NOTICE`](assets/providers/NOTICE).
+- **Popup dark mode** — the GTK popover follows `CODEXBAR_COLOR_SCHEME`, then
+  the local `gsettings` color-scheme preference, and falls back to light. This
+  does not change your Waybar theme CSS.
 - **Bar pin mode** — choose `Highest` for cross-provider max, or pin a single
   provider to show its session and weekly side by side (`🤖 5% • 1%`).
   Toggled live from the popover's Settings view, no Save needed.
 - **Inline Settings** — flips the popover body to a scrollable provider list
-  with per-provider switches; macOS-only providers appear in their own
-  greyed-out section.
+  with per-provider switches; providers whose CodexBar source is unavailable
+  on Linux appear in their own greyed-out section.
+- **Grok on Linux** — Grok is selectable when the `codexbar` CLI can read a
+  `grok login` or signed-in Grok browser session. Command Code and OpenCode Go
+  stay greyed out because the current CodexBar CLI exposes only its macOS web
+  source for those two providers.
 - **OAuth → CLI fallback for Claude.** When Anthropic's OAuth endpoint
   rate-limits, the wrapper transparently retries via the local Claude CLI
   source so the bar never goes blank.
@@ -162,6 +169,7 @@ definition or your shell profile.
 | `CODEXBAR_BAR_PROVIDER` | from `state.json` | Pin a specific provider's session/weekly to the bar regardless of state. Set to a provider ID, or unset for `Highest`. |
 | `CODEXBAR_ANTIGRAVITY_CREDS` | `~/.gemini/oauth_creds.json` | Path to the Antigravity Google OAuth creds (written by `agy login`) the wrapper feeds to the CLI. |
 | `CODEXBAR_RESET_TIME_FORMAT` | from `state.json` | Reset-time rendering mode: `provider` (use the provider's `resetDescription` as-is, default), `local` (reformat `resetsAt` in the system timezone with a TZ suffix), or `utc` (same tiering, in UTC). The popover's Settings view exposes the same toggle. |
+| `CODEXBAR_COLOR_SCHEME` | `gsettings`, then `light` | Popup-only palette override. Set `light` or `dark`; unset or set `auto` to use `gsettings get org.gnome.desktop.interface color-scheme` when available. |
 | `CODEXBAR_LAYER_SHELL_LIB` | auto-detected | Override path to `libgtk4-layer-shell.so` if your distro stashes it somewhere unusual. |
 | `XDG_CACHE_HOME` | `~/.cache` | Where `last.json` snapshots live. |
 | `XDG_DATA_HOME` | `~/.local/share` | Where provider icons live (under `codexbar-waybar/icons/`). |
@@ -192,8 +200,10 @@ is available (currently: Claude).
    `~/.cache/codexbar-waybar/last.json`. The popover paints from the cache
    for an instant first frame and then refetches in the background.
 6. The popover is a GTK4 + `gtk4-layer-shell` window anchored to the
-   top-right of the focused output. SVG provider logos are mirrored from
-   upstream CodexBar (MIT) and recoloured at load time for the light panel.
+   top-right of the focused output. It picks a light or dark palette at
+   startup from `CODEXBAR_COLOR_SCHEME` or `gsettings`; SVG provider logos are
+   mirrored from upstream CodexBar (MIT), recoloured for the selected text
+   color, and cached with color-specific filenames.
 
 ## States and styling
 
@@ -215,6 +225,8 @@ The Waybar module emits one of these classes; style them in
 | Module text is blank | Run `~/.config/waybar/scripts/codexbar.sh` directly — it should print one JSON line. |
 | Popover never shows | Run `~/.config/waybar/scripts/codexbar-popup.py` from a terminal; check the warnings. The most common one is `gtk4-layer-shell` not preloading — set `CODEXBAR_LAYER_SHELL_LIB`. |
 | `HTTP 429 rate_limit_error` from Claude | The wrapper already falls back to the local Claude CLI source. If you still see persistent errors, raise `CODEXBAR_STAGGER=1.0` and the module `interval` to 60. |
+| `Grok web billing requires ... grok login` | Run `grok login` or sign in to grok.com in a browser session the CodexBar CLI can read. |
+| Command Code or OpenCode Go is greyed out | The current CodexBar CLI reports those providers through its web source only, and that source is macOS-only. |
 | Provider logos look like blank squares | Re-run `./install.sh` to refresh `~/.local/share/codexbar-waybar/icons/`. |
 | Bar pin doesn't update instantly | Make sure your Waybar module def has `"signal": 8` (the bundled `codexbar.jsonc` already does). |
 
@@ -222,8 +234,6 @@ The Waybar module emits one of these classes; style them in
 
 - Auto-dismiss the popover on outside click (today: ESC, `✕`, or clicking the
   bar icon).
-- Dark-mode palette (auto-detect from `gsettings color-scheme` or HyDE
-  wallbash).
 - AUR `PKGBUILD` for one-shot install on Arch.
 - Optional Quickshell variant for compositors without Waybar.
 
