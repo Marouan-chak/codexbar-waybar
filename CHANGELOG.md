@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Command Code Linux auth.** The helper now reads the Command Code CLI api
+  key from `~/.commandcode/auth.json` and calls the CLI billing endpoints, so
+  `command-code login` is enough. Manual Cookie headers remain as a fallback.
+
 ## [0.3.1] — 2026-06-03
 
 ### Changed

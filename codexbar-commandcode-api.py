@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Linux API usage reader for Command Code.
 
-Reads a Command Code Cookie header from env/config and emits one
-CodexBar-compatible JSON array entry.
+Reads the Command Code CLI api key or a Command Code Cookie header and emits
+one CodexBar-compatible JSON array entry.
 """
 
 from __future__ import annotations
@@ -105,17 +105,48 @@ def read_cookie_header() -> str:
     return ""
 
 
-def load_json(url: str, cookie: str) -> dict[str, Any]:
+def commandcode_auth_path() -> Path:
+    return Path(os.environ.get(
+        "COMMANDCODE_AUTH_FILE",
+        os.environ.get(
+            "CODEXBAR_COMMANDCODE_AUTH_FILE",
+            str(Path.home() / ".commandcode/auth.json"),
+        ),
+    )).expanduser()
+
+
+def api_key_from_commandcode_auth() -> str:
+    try:
+        data = json.loads(commandcode_auth_path().read_text())
+    except (OSError, json.JSONDecodeError):
+        return ""
+    value = data.get("apiKey")
+    return value.strip() if isinstance(value, str) else ""
+
+
+def read_api_key() -> str:
+    for source in (
+        os.environ.get("CODEXBAR_COMMANDCODE_API_KEY"),
+        os.environ.get("COMMANDCODE_API_KEY"),
+        api_key_from_commandcode_auth(),
+    ):
+        if isinstance(source, str) and source.strip():
+            return source.strip()
+    return ""
+
+
+def load_json(url: str, headers: dict[str, str]) -> dict[str, Any]:
+    request_headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "User-Agent": USER_AGENT,
+        "Origin": WEB_ORIGIN,
+        "Referer": f"{WEB_ORIGIN}/",
+    }
+    request_headers.update(headers)
     request = urllib.request.Request(
         url,
-        headers={
-            "Cookie": cookie,
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "en-US,en;q=0.9",
-            "User-Agent": USER_AGENT,
-            "Origin": WEB_ORIGIN,
-            "Referer": f"{WEB_ORIGIN}/",
-        },
+        headers=request_headers,
         method="GET",
     )
     try:
@@ -287,16 +318,28 @@ def main() -> int:
     if "--self-test" in sys.argv:
         return self_test()
 
-    cookie = read_cookie_header()
-    if not cookie:
+    api_key = read_api_key()
+    cookie = "" if api_key else read_cookie_header()
+    if api_key:
+        auth_headers = {
+            "Authorization": f"Bearer {api_key}",
+            "x-api-key": api_key,
+        }
+        credits_url = f"{API_BASE}/alpha/billing/credits"
+        subscription_url = f"{API_BASE}/alpha/billing/subscriptions"
+    elif cookie:
+        auth_headers = {"Cookie": cookie}
+        credits_url = f"{API_BASE}/internal/billing/credits"
+        subscription_url = f"{API_BASE}/internal/billing/subscriptions"
+    else:
         return error(
-            "Set CODEXBAR_COMMANDCODE_COOKIE or CODEXBAR_COMMANDCODE_COOKIE_FILE "
-            "to a Command Code Cookie header.",
+            "Run command-code login or set CODEXBAR_COMMANDCODE_API_KEY. "
+            "Cookie fallback also supports CODEXBAR_COMMANDCODE_COOKIE(_FILE).",
         )
 
     try:
-        credits = load_json(f"{API_BASE}/internal/billing/credits", cookie)
-        subscription = load_json(f"{API_BASE}/internal/billing/subscriptions", cookie)
+        credits = load_json(credits_url, auth_headers)
+        subscription = load_json(subscription_url, auth_headers)
         return emit(entry_from_payloads(credits, subscription))
     except RuntimeError as exc:
         return error(str(exc))

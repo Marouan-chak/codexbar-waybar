@@ -46,7 +46,7 @@ compositor with Waybar + gtk4-layer-shell.
   on Linux appear in their own greyed-out section.
 - **Linux-native helpers for web-only CLI providers.** OpenCode Go is read
   from the local OpenCode history database, and Command Code can read billing
-  data from its API when you provide a Command Code Cookie header.
+  data from its API using the Command Code CLI login.
 - **Grok on Linux** — Grok is selectable when the `codexbar` CLI can read a
   `grok login` or signed-in Grok browser session.
 - **OAuth → CLI fallback for Claude.** When Anthropic's OAuth endpoint
@@ -172,8 +172,10 @@ definition or your shell profile.
 | `CODEXBAR_ANTIGRAVITY_CREDS` | `~/.gemini/oauth_creds.json` | Path to the Antigravity Google OAuth creds (written by `agy login`) the wrapper feeds to the CLI. |
 | `CODEXBAR_OPENCODEGO_AUTH` | `~/.local/share/opencode/auth.json` | Override the OpenCode auth file checked before reading local OpenCode Go usage. |
 | `CODEXBAR_OPENCODEGO_DB` | `~/.local/share/opencode/opencode.db` | Override the OpenCode SQLite database used for local OpenCode Go usage. |
-| `CODEXBAR_COMMANDCODE_COOKIE` | unset | Command Code Cookie header. Accepts either the raw cookie string or a `Cookie: ...` header. |
-| `CODEXBAR_COMMANDCODE_COOKIE_FILE` | unset | File containing a Command Code Cookie header. Use this instead of putting the cookie in your Waybar config. |
+| `CODEXBAR_COMMANDCODE_AUTH_FILE` | `~/.commandcode/auth.json` | Command Code CLI auth file. Used first so `command-code login` is enough for billing usage. |
+| `CODEXBAR_COMMANDCODE_API_KEY` | unset | Command Code CLI api key override. Usually unnecessary when `~/.commandcode/auth.json` exists. |
+| `CODEXBAR_COMMANDCODE_COOKIE` | unset | Fallback Command Code Cookie header. Accepts either the raw cookie string or a `Cookie: ...` header. |
+| `CODEXBAR_COMMANDCODE_COOKIE_FILE` | unset | Fallback file containing a Command Code Cookie header. |
 | `CODEXBAR_RESET_TIME_FORMAT` | from `state.json` | Reset-time rendering mode: `provider` (use the provider's `resetDescription` as-is, default), `local` (reformat `resetsAt` in the system timezone with a TZ suffix), or `utc` (same tiering, in UTC). The popover's Settings view exposes the same toggle. |
 | `CODEXBAR_COLOR_SCHEME` | `gsettings`, then `light` | Popup-only palette override. Set `light` or `dark`; unset or set `auto` to use `gsettings get org.gnome.desktop.interface color-scheme` when available. |
 | `CODEXBAR_LAYER_SHELL_LIB` | auto-detected | Override path to `libgtk4-layer-shell.so` if your distro stashes it somewhere unusual. |
@@ -236,7 +238,7 @@ The Waybar module emits one of these classes; style them in
 | Popover never shows | Run `~/.config/waybar/scripts/codexbar-popup.py` from a terminal; check the warnings. The most common one is `gtk4-layer-shell` not preloading — set `CODEXBAR_LAYER_SHELL_LIB`. |
 | `HTTP 429 rate_limit_error` from Claude | The wrapper already falls back to the local Claude CLI source. If you still see persistent errors, raise `CODEXBAR_STAGGER=1.0` and the module `interval` to 60. |
 | `Grok web billing requires ... grok login` | Run `grok login` or sign in to grok.com in a browser session the CodexBar CLI can read. |
-| Command Code asks for a Cookie header | Put a Command Code `Cookie: ...` capture in a file and set `CODEXBAR_COMMANDCODE_COOKIE_FILE` in the Waybar module environment. |
+| Command Code asks for auth | Run `command-code login`, or point `CODEXBAR_COMMANDCODE_AUTH_FILE` at the CLI auth file you want. Cookie env vars remain available as a fallback. |
 | OpenCode Go has no local usage rows | Use OpenCode Go locally first, or point `CODEXBAR_OPENCODEGO_DB` at the OpenCode database you want to read. |
 | Provider logos look like blank squares | Re-run `./install.sh` to refresh `~/.local/share/codexbar-waybar/icons/`. |
 | Bar pin doesn't update instantly | Make sure your Waybar module def has `"signal": 8` (the bundled `codexbar.jsonc` already does). |
