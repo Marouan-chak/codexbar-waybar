@@ -91,12 +91,7 @@ PROVIDER_ICON_ALIAS = {
 LINUX_SUPPORTED = {
     "codex", "claude", "gemini", "copilot", "kilo", "openrouter", "deepseek",
     "moonshot", "codebuff", "zai", "warp", "venice", "crof", "minimax",
-    "kimik2", "vertexai", "antigravity", "grok",
-}
-
-LINUX_UNSUPPORTED_HINTS = {
-    "commandcode": "web source only",
-    "opencodego": "web source only",
+    "kimik2", "vertexai", "antigravity", "grok", "commandcode", "opencodego",
 }
 
 CONFIG_PATH = Path.home() / ".codexbar" / "config.json"
@@ -1022,7 +1017,7 @@ class CodexBarPopup(Gtk.Application):
         row.append(name)
 
         if not enabled_ui:
-            hint = Gtk.Label(label=LINUX_UNSUPPORTED_HINTS.get(pid, "macOS only"), xalign=1.0)
+            hint = Gtk.Label(label="macOS only", xalign=1.0)
             hint.add_css_class("codexbar-settings-hint")
             row.append(hint)
 

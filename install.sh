@@ -4,7 +4,7 @@
 # Idempotent: re-running just refreshes the installed scripts.
 #
 # What it does:
-#   - Copies codexbar.sh and codexbar-popup.py to $XDG_CONFIG_HOME/waybar/scripts/
+#   - Copies codexbar.sh, provider helpers, and codexbar-popup.py to $XDG_CONFIG_HOME/waybar/scripts/
 #   - Drops codexbar.jsonc (as custom-codexbar.json) into $XDG_CONFIG_HOME/waybar/modules/
 #   - Appends codexbar.css to $XDG_CONFIG_HOME/waybar/user-style.css (or creates it)
 #   - Installs provider SVG icons to $XDG_DATA_HOME/codexbar-waybar/icons/
@@ -57,6 +57,8 @@ done
 mkdir -p "$WAYBAR_CONF/scripts" "$WAYBAR_CONF/modules"
 install -m 0755 "$SCRIPT_DIR/codexbar.sh"        "$WAYBAR_CONF/scripts/codexbar.sh"
 install -m 0755 "$SCRIPT_DIR/codexbar-popup.py"  "$WAYBAR_CONF/scripts/codexbar-popup.py"
+install -m 0755 "$SCRIPT_DIR/codexbar-commandcode-api.py" "$WAYBAR_CONF/scripts/codexbar-commandcode-api.py"
+install -m 0755 "$SCRIPT_DIR/codexbar-opencodego-local.py" "$WAYBAR_CONF/scripts/codexbar-opencodego-local.py"
 install -m 0644 "$SCRIPT_DIR/codexbar.jsonc"     "$WAYBAR_CONF/modules/custom-codexbar.json"
 green "Installed scripts → $WAYBAR_CONF/scripts/"
 green "Installed module  → $WAYBAR_CONF/modules/custom-codexbar.json"

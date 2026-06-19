@@ -15,6 +15,8 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 CODEXBAR="${CODEXBAR_BIN:-${HOME}/.local/bin/codexbar}"
+COMMANDCODE_HELPER="${SCRIPT_DIR}/codexbar-commandcode-api.py"
+OPENCODEGO_HELPER="${SCRIPT_DIR}/codexbar-opencodego-local.py"
 CONFIG_PATH="${HOME}/.codexbar/config.json"
 STATE_PATH="${XDG_CONFIG_HOME:-${HOME}/.config}/codexbar-waybar/state.json"
 CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/codexbar-waybar"
@@ -146,6 +148,21 @@ ANTIGRAVITY_CREDS="${CODEXBAR_ANTIGRAVITY_CREDS:-${HOME}/.gemini/oauth_creds.jso
 
 fetch_one() {
     local p="$1" src="$2"
+    case "$p" in
+        commandcode)
+            if [[ -x "$COMMANDCODE_HELPER" ]]; then
+                "$COMMANDCODE_HELPER" 2>/dev/null
+                return
+            fi
+            ;;
+        opencodego)
+            if [[ -x "$OPENCODEGO_HELPER" ]]; then
+                "$OPENCODEGO_HELPER" 2>/dev/null
+                return
+            fi
+            ;;
+    esac
+
     local args=(usage --provider "$p" --format json --no-color)
     [[ -n "$src" ]] && args+=(--source "$src")
     if [[ "$p" == "antigravity" ]]; then
