@@ -52,9 +52,14 @@ compositor with Waybar + gtk4-layer-shell.
 - **OAuth → CLI fallback for Claude.** When Anthropic's OAuth endpoint
   rate-limits, the wrapper transparently retries via the local Claude CLI
   source so the bar never goes blank.
-- **Antigravity via `agy` login and local SSL shim.** The CLI expects Antigravity's Google OAuth
-  creds at `~/.codexbar/antigravity/oauth_creds.json` (written by the macOS
-  app). The wrapper bridges the credentials that `agy login` drops at `~/.gemini/oauth_creds.json` on Linux. Additionally, it dynamically extracts the local Antigravity language server's self-signed TLS certificate and preloads a custom redirect shim (`cert_redirect.so`) to make the CLI trust local loopback connections without modifying the system CA store.
+- **Antigravity via OAuth or `agy` login.** The wrapper prefers explicit
+  `CODEXBAR_ANTIGRAVITY_CREDS`, then an ai-router Antigravity auth file, and
+  finally the Gemini credentials that `agy login` writes at
+  `~/.gemini/oauth_creds.json`. OAuth-shaped Antigravity creds use CodexBar's
+  remote OAuth source; Gemini creds keep using the local `agy` probe. The local
+  probe dynamically extracts the Antigravity language server's self-signed TLS
+  certificate and preloads a custom redirect shim (`cert_redirect.so`) without
+  modifying the system CA store.
 - **Last-good cache** at `~/.cache/codexbar-waybar/last.json`. Transient 429s
   or network blips reuse the previous value and surface as `stale` instead of
   blanking the bar.
@@ -169,7 +174,8 @@ definition or your shell profile.
 | `CODEXBAR_STAGGER` | `0.5` | Seconds between provider fetches (raise it if Claude OAuth keeps 429-ing). |
 | `CODEXBAR_PROVIDERS` | from `config.json` | Space-separated provider IDs to query, bypassing `~/.codexbar/config.json`. Set per-Waybar instance if you want different sets per monitor. |
 | `CODEXBAR_BAR_PROVIDER` | from `state.json` | Pin a specific provider's session/weekly to the bar regardless of state. Set to a provider ID, or unset for `Highest`. |
-| `CODEXBAR_ANTIGRAVITY_CREDS` | `~/.gemini/oauth_creds.json` | Path to the Antigravity Google OAuth creds (written by `agy login`) the wrapper feeds to the CLI. |
+| `CODEXBAR_ANTIGRAVITY_CREDS` | ai-router Antigravity auth, else `~/.gemini/oauth_creds.json` | Path to the Antigravity OAuth creds the wrapper feeds to the CLI. |
+| `CODEXBAR_ANTIGRAVITY_SOURCE` | auto | Override CodexBar source for Antigravity (`oauth`, `cli`, or `auto`). OAuth-shaped ai-router creds default to `oauth`; Gemini creds default to CodexBar auto/local CLI behavior. |
 | `CODEXBAR_OPENCODEGO_AUTH` | `~/.local/share/opencode/auth.json` | Override the OpenCode auth file checked before reading local OpenCode Go usage. |
 | `CODEXBAR_OPENCODEGO_DB` | `~/.local/share/opencode/opencode.db` | Override the OpenCode SQLite database used for local OpenCode Go usage. |
 | `CODEXBAR_COMMANDCODE_AUTH_FILE` | `~/.commandcode/auth.json` | Command Code CLI auth file. Used first so `command-code login` is enough for billing usage. |

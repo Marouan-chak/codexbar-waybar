@@ -139,14 +139,34 @@ declare -A FALLBACK_SOURCES=(
     [claude]=cli
 )
 
-# Antigravity has no Linux login flow in the CLI: it expects Google OAuth
-# credentials at ~/.codexbar/antigravity/oauth_creds.json (written by the macOS
-# app), or passed inline via $ANTIGRAVITY_OAUTH_CREDENTIALS_JSON. On Linux the
-# Antigravity CLI (`agy`) logs in through the shared Gemini flow and drops the
-# same Google creds at ~/.gemini/oauth_creds.json. Bridge that file into the
-# env var so an `agy` login satisfies codexbar without a second login.
-# Override the source path with $CODEXBAR_ANTIGRAVITY_CREDS.
-ANTIGRAVITY_CREDS="${CODEXBAR_ANTIGRAVITY_CREDS:-${HOME}/.gemini/oauth_creds.json}"
+# Antigravity accepts inline OAuth creds via $ANTIGRAVITY_OAUTH_CREDENTIALS_JSON.
+# Prefer explicit creds, then ai-router's Antigravity auth store when present,
+# and finally the Gemini/agy OAuth file used by the local CLI probe.
+default_antigravity_creds() {
+    local ai_router_dir="${XDG_DATA_HOME:-${HOME}/.local/share}/ai-router/auths"
+    local path
+    for path in "$ai_router_dir"/antigravity-*.json; do
+        [[ -f "$path" ]] || continue
+        echo "$path"
+        return
+    done
+    echo "${HOME}/.gemini/oauth_creds.json"
+}
+
+ANTIGRAVITY_CREDS="${CODEXBAR_ANTIGRAVITY_CREDS:-$(default_antigravity_creds)}"
+
+antigravity_creds_support_oauth_source() {
+    local path="$1"
+    [[ -f "$path" ]] || return 1
+    command -v jq >/dev/null 2>&1 || return 1
+    jq -e '(.type == "antigravity") or ((.project_id // "") | length > 0)' "$path" >/dev/null 2>&1
+}
+
+ANTIGRAVITY_SOURCE="${CODEXBAR_ANTIGRAVITY_SOURCE:-}"
+if [[ -z "$ANTIGRAVITY_SOURCE" ]] && antigravity_creds_support_oauth_source "$ANTIGRAVITY_CREDS"; then
+    ANTIGRAVITY_SOURCE="oauth"
+fi
+[[ -n "$ANTIGRAVITY_SOURCE" ]] && SOURCE_OVERRIDES[antigravity]="$ANTIGRAVITY_SOURCE"
 
 fetch_one() {
     local p="$1" src="$2"
@@ -390,9 +410,14 @@ echo "$merged" | jq -c \
                end
         end;
 
+    def fmt_pct:
+        if type == "number" then
+            (((. * 10) | round) / 10 | tostring | sub("\\.0$"; ""))
+        else tostring end;
+
     def fmt_window(w; name):
         if w == null or w.usedPercent == null then empty
-        else "\(name): \(w.usedPercent)%" + reset_phrase(w)
+        else "\(name): \(w.usedPercent | fmt_pct)%" + reset_phrase(w)
         end;
 
     def provider_lines(entry):
@@ -442,7 +467,7 @@ echo "$merged" | jq -c \
     | {
         text: (if $pinned != null then bar_text($pinned)
                elif $all_errored then "🤖 ⚠"
-               else "🤖 \($pct)%" end),
+               else "🤖 \($pct | fmt_pct)%" end),
         tooltip: ($lines | join("\n")),
         class: (if $all_errored then "stale"
                 elif $pct >= 90 then "critical"

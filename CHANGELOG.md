@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Command Code Linux auth.** The helper now reads the Command Code CLI api
   key from `~/.commandcode/auth.json` and calls the CLI billing endpoints, so
   `command-code login` is enough. Manual Cookie headers remain as a fallback.
+- **Antigravity account selection on Linux.** The wrapper now prefers
+  ai-router Antigravity OAuth creds when present and uses CodexBar's OAuth
+  source for those creds, avoiding the local `agy` probe picking a different
+  Gemini account.
 
 ## [0.3.1] — 2026-06-03
 
