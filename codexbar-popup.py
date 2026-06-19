@@ -243,7 +243,18 @@ window.codexbar-popup {
     background-color: @codexbar_active_bg;
     color: @codexbar_active_text;
 }
-.codexbar-tab label { color: inherit; font-size: 12px; font-weight: 600; }
+.codexbar-tab label {
+    color: inherit;
+}
+.codexbar-tab label.codexbar-tab-title {
+    font-size: 12px;
+    font-weight: 600;
+}
+.codexbar-tab label.codexbar-tab-subtitle {
+    font-size: 10px;
+    font-weight: 500;
+    opacity: 0.78;
+}
 
 .codexbar-iconbtn {
     padding: 5px 9px;
@@ -693,7 +704,8 @@ class CodexBarPopup(Gtk.Application):
         self.window.present()
 
     def _make_pill(self, label: str, css_classes: list[str], on_click,
-                   *, icon_pid: str | None = None) -> Gtk.Widget:
+                   *, icon_pid: str | None = None,
+                   subtitle: str | None = None) -> Gtk.Widget:
         """A clickable pill made from Gtk.Box + Gtk.Label so we bypass
         Gtk.Button styling. Optionally prefixes a provider SVG icon."""
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -702,8 +714,19 @@ class CodexBarPopup(Gtk.Application):
             icon = make_icon(icon_pid, size=14, color=self._icon_color(css_classes))
             if icon is not None:
                 box.append(icon)
-        lbl = Gtk.Label(label=label)
-        box.append(lbl)
+        if subtitle:
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            title = Gtk.Label(label=label, xalign=0.0)
+            title.add_css_class("codexbar-tab-title")
+            text.append(title)
+            sub = Gtk.Label(label=subtitle, xalign=0.0)
+            sub.add_css_class("codexbar-tab-subtitle")
+            text.append(sub)
+            box.append(text)
+        else:
+            lbl = Gtk.Label(label=label)
+            lbl.add_css_class("codexbar-tab-title")
+            box.append(lbl)
         gesture = Gtk.GestureClick()
         gesture.connect("released", lambda _g, _n, _x, _y: on_click())
         box.add_controller(gesture)
@@ -942,6 +965,39 @@ class CodexBarPopup(Gtk.Application):
         note.add_css_class("codexbar-subtitle")
         self.body.append(note)
 
+    @staticmethod
+    def _format_pct(value: float) -> str:
+        rounded = round(value, 1)
+        return str(int(rounded)) if rounded.is_integer() else f"{rounded:.1f}"
+
+    def _entry_for_provider(self, pid: str) -> dict | None:
+        return next((entry for entry in self.data if entry.get("provider") == pid), None)
+
+    def _bar_chip_subtitle(self, pid: str | None) -> str:
+        if pid is None:
+            healthy = [entry for entry in self.data if not entry.get("error")]
+            if not healthy:
+                return "Highest usage"
+            max_entry = max(healthy, key=max_pct)
+            pct = max_pct(max_entry)
+            name = PROVIDER_NAMES.get(max_entry.get("provider", ""), "Provider")
+            return f"{name} {self._format_pct(pct)}% used"
+
+        entry = self._entry_for_provider(pid)
+        if not entry:
+            return "No data yet"
+        if entry.get("error"):
+            return "Needs setup"
+
+        usage = entry.get("usage") or {}
+        for key, label in (("secondary", "weekly"), ("primary", "current"), ("tertiary", "monthly")):
+            window = usage.get(key) or {}
+            pct = window.get("usedPercent")
+            if isinstance(pct, (int, float)):
+                remaining = max(0.0, min(100.0, 100.0 - float(pct)))
+                return f"{self._format_pct(remaining)}% {label} left"
+        return "No usage yet"
+
     def _build_bar_provider_picker(self, existing: dict[str, bool]) -> Gtk.Widget:
         wrap = Gtk.FlowBox()
         wrap.add_css_class("codexbar-bar-picker")
@@ -957,7 +1013,8 @@ class CodexBarPopup(Gtk.Application):
             chip = self._make_pill(
                 label, classes,
                 lambda p=pid: self._on_bar_provider_change(p),
-                icon_pid=pid)
+                icon_pid=pid,
+                subtitle=self._bar_chip_subtitle(pid))
             return chip
 
         wrap.append(make_chip(None, "Highest"))
