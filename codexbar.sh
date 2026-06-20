@@ -17,7 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CODEXBAR="${CODEXBAR_BIN:-${HOME}/.local/bin/codexbar}"
 COMMANDCODE_HELPER="${SCRIPT_DIR}/codexbar-commandcode-api.py"
 OPENCODEGO_HELPER="${SCRIPT_DIR}/codexbar-opencodego-local.py"
-PROVIDER_TIMEOUT_SECS="${CODEXBAR_PROVIDER_TIMEOUT:-15}"
+PROVIDER_TIMEOUT_SECS="${CODEXBAR_PROVIDER_TIMEOUT:-25}"
 CONFIG_PATH="${HOME}/.codexbar/config.json"
 STATE_PATH="${XDG_CONFIG_HOME:-${HOME}/.config}/codexbar-waybar/state.json"
 CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/codexbar-waybar"
@@ -132,12 +132,10 @@ declare -A SOURCE_OVERRIDES=(
     [claude]=oauth
 )
 
-# If the primary source returns a provider-level error (e.g. Claude OAuth
-# hitting HTTP 429), fall back to this source. Mostly useful for Claude
-# where the local CLI logs have the same windowing data.
-declare -A FALLBACK_SOURCES=(
-    [claude]=cli
-)
+# Optional per-provider fallback source. Keep this empty by default on Linux:
+# Claude's CLI source can spawn interactive CLI/MCP sessions and mask auth
+# errors as timeouts.
+declare -A FALLBACK_SOURCES=()
 
 # Antigravity accepts inline OAuth creds via $ANTIGRAVITY_OAUTH_CREDENTIALS_JSON.
 # Prefer explicit creds, then ai-router's Antigravity auth store when present,

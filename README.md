@@ -49,9 +49,9 @@ compositor with Waybar + gtk4-layer-shell.
   data from its API using the Command Code CLI login.
 - **Grok on Linux** — Grok is selectable when the `codexbar` CLI can read a
   `grok login` or signed-in Grok browser session.
-- **OAuth → CLI fallback for Claude.** When Anthropic's OAuth endpoint
-  rate-limits, the wrapper transparently retries via the local Claude CLI
-  source so the bar never goes blank.
+- **OAuth-first Claude on Linux.** Claude stays on CodexBar's OAuth source by
+  default so expired or revoked logins remain visible instead of being masked by
+  a hanging local CLI fallback.
 - **Antigravity via OAuth or `agy` login.** The wrapper prefers explicit
   `CODEXBAR_ANTIGRAVITY_CREDS`, then an ai-router Antigravity auth file, and
   finally the Gemini credentials that `agy login` writes at
@@ -192,8 +192,7 @@ To change which providers appear, open the popover and click **Settings…** —
 the inline view lets you toggle providers and Save back to
 `~/.codexbar/config.json`. Codex and Claude need `--source oauth` on Linux;
 the wrapper sets that automatically via `SOURCE_OVERRIDES` at the top of
-`codexbar.sh` and falls back to `--source cli` on errors where the CLI source
-is available (currently: Claude).
+`codexbar.sh`.
 
 ## How it works
 
@@ -206,10 +205,10 @@ is available (currently: Claude).
    CodexBar CLI exposes only a macOS web source for those two providers.
 3. Each response is the same JSON payload the macOS menu-bar app consumes:
    primary / secondary / tertiary usage windows, reset timestamps, credit
-   balances, error info. Claude OAuth 429s trigger a transparent retry via
-   `--source cli` so the bar keeps working off the local Claude CLI logs.
+   balances, error info.
    OpenCode Go is derived from `~/.local/share/opencode/opencode.db`; Command
-   Code uses `api.commandcode.ai/internal/billing/*` with a Cookie header.
+   Code uses the CLI api key with `api.commandcode.ai/alpha/billing/*`, with a
+   Cookie header still available as a fallback.
 4. The wrapper collapses the merged payload into Waybar's JSON contract
    `{"text", "tooltip", "class", "percentage"}`. The `text` field honours
    `~/.config/codexbar-waybar/state.json` (pinned provider) or falls back to
@@ -242,7 +241,8 @@ The Waybar module emits one of these classes; style them in
 | `libxml2.so.2: cannot open shared object file` | Install your distro's libxml2 v2.13 compat (`libxml2-legacy` on Arch). |
 | Module text is blank | Run `~/.config/waybar/scripts/codexbar.sh` directly — it should print one JSON line. |
 | Popover never shows | Run `~/.config/waybar/scripts/codexbar-popup.py` from a terminal; check the warnings. The most common one is `gtk4-layer-shell` not preloading — set `CODEXBAR_LAYER_SHELL_LIB`. |
-| `HTTP 429 rate_limit_error` from Claude | The wrapper already falls back to the local Claude CLI source. If you still see persistent errors, raise `CODEXBAR_STAGGER=1.0` and the module `interval` to 60. |
+| Claude reports an expired OAuth token | Run `claude login`, then retry the module refresh. |
+| `HTTP 429 rate_limit_error` from Claude | Raise `CODEXBAR_STAGGER=1.0` and the module `interval` to 60. |
 | `Grok web billing requires ... grok login` | Run `grok login` or sign in to grok.com in a browser session the CodexBar CLI can read. |
 | Command Code asks for auth | Run `command-code login`, or point `CODEXBAR_COMMANDCODE_AUTH_FILE` at the CLI auth file you want. Cookie env vars remain available as a fallback. |
 | OpenCode Go has no local usage rows | Use OpenCode Go locally first, or point `CODEXBAR_OPENCODEGO_DB` at the OpenCode database you want to read. |
