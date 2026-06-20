@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Command Code Linux auth.** The helper now reads the Command Code CLI api
+  key from `~/.commandcode/auth.json` and calls the CLI billing endpoints, so
+  `command-code login` is enough. Manual Cookie headers remain as a fallback.
+- **Antigravity account selection on Linux.** The wrapper now prefers
+  ai-router Antigravity OAuth creds when present and uses CodexBar's OAuth
+  source for those creds, avoiding the local `agy` probe picking a different
+  Gemini account.
+- **Claude timeout reporting on Linux.** The wrapper now keeps Claude on the
+  OAuth source by default instead of silently falling back to the local CLI
+  source, so expired or revoked logins surface as actionable auth errors rather
+  than Waybar timeouts. Provider fetches now allow enough time for CodexBar's
+  delegated Claude OAuth refresh attempt to return its explicit login error.
+
 ## [0.3.1] — 2026-06-03
 
 ### Changed

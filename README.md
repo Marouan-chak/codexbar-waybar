@@ -33,20 +33,33 @@ compositor with Waybar + gtk4-layer-shell.
 ## Features
 
 - **Provider logos** in the tab strip and settings rows, sourced from
-  upstream CodexBar (39 brand marks). Auto-recoloured for light backgrounds;
+  upstream CodexBar (39 brand marks). Auto-recoloured for the popup theme;
   see [`assets/providers/NOTICE`](assets/providers/NOTICE).
+- **Popup dark mode** — the GTK popover follows `CODEXBAR_COLOR_SCHEME`, then
+  the local `gsettings` color-scheme preference, and falls back to light. This
+  does not change your Waybar theme CSS.
 - **Bar pin mode** — choose `Highest` for cross-provider max, or pin a single
   provider to show its session and weekly side by side (`🤖 5% • 1%`).
   Toggled live from the popover's Settings view, no Save needed.
 - **Inline Settings** — flips the popover body to a scrollable provider list
-  with per-provider switches; macOS-only providers appear in their own
-  greyed-out section.
-- **OAuth → CLI fallback for Claude.** When Anthropic's OAuth endpoint
-  rate-limits, the wrapper transparently retries via the local Claude CLI
-  source so the bar never goes blank.
-- **Antigravity via `agy` login and local SSL shim.** The CLI expects Antigravity's Google OAuth
-  creds at `~/.codexbar/antigravity/oauth_creds.json` (written by the macOS
-  app). The wrapper bridges the credentials that `agy login` drops at `~/.gemini/oauth_creds.json` on Linux. Additionally, it dynamically extracts the local Antigravity language server's self-signed TLS certificate and preloads a custom redirect shim (`cert_redirect.so`) to make the CLI trust local loopback connections without modifying the system CA store.
+  with per-provider switches; providers whose CodexBar source is unavailable
+  on Linux appear in their own greyed-out section.
+- **Linux-native helpers for web-only CLI providers.** OpenCode Go is read
+  from the local OpenCode history database, and Command Code can read billing
+  data from its API using the Command Code CLI login.
+- **Grok on Linux** — Grok is selectable when the `codexbar` CLI can read a
+  `grok login` or signed-in Grok browser session.
+- **OAuth-first Claude on Linux.** Claude stays on CodexBar's OAuth source by
+  default so expired or revoked logins remain visible instead of being masked by
+  a hanging local CLI fallback.
+- **Antigravity via OAuth or `agy` login.** The wrapper prefers explicit
+  `CODEXBAR_ANTIGRAVITY_CREDS`, then an ai-router Antigravity auth file, and
+  finally the Gemini credentials that `agy login` writes at
+  `~/.gemini/oauth_creds.json`. OAuth-shaped Antigravity creds use CodexBar's
+  remote OAuth source; Gemini creds keep using the local `agy` probe. The local
+  probe dynamically extracts the Antigravity language server's self-signed TLS
+  certificate and preloads a custom redirect shim (`cert_redirect.so`) without
+  modifying the system CA store.
 - **Last-good cache** at `~/.cache/codexbar-waybar/last.json`. Transient 429s
   or network blips reuse the previous value and surface as `stale` instead of
   blanking the bar.
@@ -115,7 +128,8 @@ cd codexbar-waybar
 
 The installer:
 
-- Copies `codexbar.sh` and `codexbar-popup.py` to `~/.config/waybar/scripts/`.
+- Copies `codexbar.sh`, provider helpers, and `codexbar-popup.py` to
+  `~/.config/waybar/scripts/`.
 - Drops `codexbar.jsonc` as `~/.config/waybar/modules/custom-codexbar.json`.
 - Appends `codexbar.css` to `~/.config/waybar/user-style.css` (idempotent).
 - Installs provider SVGs to `~/.local/share/codexbar-waybar/icons/`.
@@ -160,8 +174,16 @@ definition or your shell profile.
 | `CODEXBAR_STAGGER` | `0.5` | Seconds between provider fetches (raise it if Claude OAuth keeps 429-ing). |
 | `CODEXBAR_PROVIDERS` | from `config.json` | Space-separated provider IDs to query, bypassing `~/.codexbar/config.json`. Set per-Waybar instance if you want different sets per monitor. |
 | `CODEXBAR_BAR_PROVIDER` | from `state.json` | Pin a specific provider's session/weekly to the bar regardless of state. Set to a provider ID, or unset for `Highest`. |
-| `CODEXBAR_ANTIGRAVITY_CREDS` | `~/.gemini/oauth_creds.json` | Path to the Antigravity Google OAuth creds (written by `agy login`) the wrapper feeds to the CLI. |
+| `CODEXBAR_ANTIGRAVITY_CREDS` | ai-router Antigravity auth, else `~/.gemini/oauth_creds.json` | Path to the Antigravity OAuth creds the wrapper feeds to the CLI. |
+| `CODEXBAR_ANTIGRAVITY_SOURCE` | auto | Override CodexBar source for Antigravity (`oauth`, `cli`, or `auto`). OAuth-shaped ai-router creds default to `oauth`; Gemini creds default to CodexBar auto/local CLI behavior. |
+| `CODEXBAR_OPENCODEGO_AUTH` | `~/.local/share/opencode/auth.json` | Override the OpenCode auth file checked before reading local OpenCode Go usage. |
+| `CODEXBAR_OPENCODEGO_DB` | `~/.local/share/opencode/opencode.db` | Override the OpenCode SQLite database used for local OpenCode Go usage. |
+| `CODEXBAR_COMMANDCODE_AUTH_FILE` | `~/.commandcode/auth.json` | Command Code CLI auth file. Used first so `command-code login` is enough for billing usage. |
+| `CODEXBAR_COMMANDCODE_API_KEY` | unset | Command Code CLI api key override. Usually unnecessary when `~/.commandcode/auth.json` exists. |
+| `CODEXBAR_COMMANDCODE_COOKIE` | unset | Fallback Command Code Cookie header. Accepts either the raw cookie string or a `Cookie: ...` header. |
+| `CODEXBAR_COMMANDCODE_COOKIE_FILE` | unset | Fallback file containing a Command Code Cookie header. |
 | `CODEXBAR_RESET_TIME_FORMAT` | from `state.json` | Reset-time rendering mode: `provider` (use the provider's `resetDescription` as-is, default), `local` (reformat `resetsAt` in the system timezone with a TZ suffix), or `utc` (same tiering, in UTC). The popover's Settings view exposes the same toggle. |
+| `CODEXBAR_COLOR_SCHEME` | `gsettings`, then `light` | Popup-only palette override. Set `light` or `dark`; unset or set `auto` to use `gsettings get org.gnome.desktop.interface color-scheme` when available. |
 | `CODEXBAR_LAYER_SHELL_LIB` | auto-detected | Override path to `libgtk4-layer-shell.so` if your distro stashes it somewhere unusual. |
 | `XDG_CACHE_HOME` | `~/.cache` | Where `last.json` snapshots live. |
 | `XDG_DATA_HOME` | `~/.local/share` | Where provider icons live (under `codexbar-waybar/icons/`). |
@@ -170,20 +192,23 @@ To change which providers appear, open the popover and click **Settings…** —
 the inline view lets you toggle providers and Save back to
 `~/.codexbar/config.json`. Codex and Claude need `--source oauth` on Linux;
 the wrapper sets that automatically via `SOURCE_OVERRIDES` at the top of
-`codexbar.sh` and falls back to `--source cli` on errors where the CLI source
-is available (currently: Claude).
+`codexbar.sh`.
 
 ## How it works
 
 1. Waybar runs `codexbar.sh` every 30 s (or whenever it receives
    `SIGRTMIN+8`).
 2. The script reads `~/.codexbar/config.json` to learn which providers are
-   enabled, then invokes `codexbar usage --provider <p> --format json` once
-   per enabled provider, sequentially, with a small stagger.
+   enabled, then queries each provider sequentially, with a small stagger.
+   Most providers use `codexbar usage --provider <p> --format json`; Command
+   Code and OpenCode Go use bundled Linux helpers first because the current
+   CodexBar CLI exposes only a macOS web source for those two providers.
 3. Each response is the same JSON payload the macOS menu-bar app consumes:
    primary / secondary / tertiary usage windows, reset timestamps, credit
-   balances, error info. Claude OAuth 429s trigger a transparent retry via
-   `--source cli` so the bar keeps working off the local Claude CLI logs.
+   balances, error info.
+   OpenCode Go is derived from `~/.local/share/opencode/opencode.db`; Command
+   Code uses the CLI api key with `api.commandcode.ai/alpha/billing/*`, with a
+   Cookie header still available as a fallback.
 4. The wrapper collapses the merged payload into Waybar's JSON contract
    `{"text", "tooltip", "class", "percentage"}`. The `text` field honours
    `~/.config/codexbar-waybar/state.json` (pinned provider) or falls back to
@@ -192,8 +217,10 @@ is available (currently: Claude).
    `~/.cache/codexbar-waybar/last.json`. The popover paints from the cache
    for an instant first frame and then refetches in the background.
 6. The popover is a GTK4 + `gtk4-layer-shell` window anchored to the
-   top-right of the focused output. SVG provider logos are mirrored from
-   upstream CodexBar (MIT) and recoloured at load time for the light panel.
+   top-right of the focused output. It picks a light or dark palette at
+   startup from `CODEXBAR_COLOR_SCHEME` or `gsettings`; SVG provider logos are
+   mirrored from upstream CodexBar (MIT), recoloured for the selected text
+   color, and cached with color-specific filenames.
 
 ## States and styling
 
@@ -214,7 +241,11 @@ The Waybar module emits one of these classes; style them in
 | `libxml2.so.2: cannot open shared object file` | Install your distro's libxml2 v2.13 compat (`libxml2-legacy` on Arch). |
 | Module text is blank | Run `~/.config/waybar/scripts/codexbar.sh` directly — it should print one JSON line. |
 | Popover never shows | Run `~/.config/waybar/scripts/codexbar-popup.py` from a terminal; check the warnings. The most common one is `gtk4-layer-shell` not preloading — set `CODEXBAR_LAYER_SHELL_LIB`. |
-| `HTTP 429 rate_limit_error` from Claude | The wrapper already falls back to the local Claude CLI source. If you still see persistent errors, raise `CODEXBAR_STAGGER=1.0` and the module `interval` to 60. |
+| Claude reports an expired OAuth token | Run `claude login`, then retry the module refresh. |
+| `HTTP 429 rate_limit_error` from Claude | Raise `CODEXBAR_STAGGER=1.0` and the module `interval` to 60. |
+| `Grok web billing requires ... grok login` | Run `grok login` or sign in to grok.com in a browser session the CodexBar CLI can read. |
+| Command Code asks for auth | Run `command-code login`, or point `CODEXBAR_COMMANDCODE_AUTH_FILE` at the CLI auth file you want. Cookie env vars remain available as a fallback. |
+| OpenCode Go has no local usage rows | Use OpenCode Go locally first, or point `CODEXBAR_OPENCODEGO_DB` at the OpenCode database you want to read. |
 | Provider logos look like blank squares | Re-run `./install.sh` to refresh `~/.local/share/codexbar-waybar/icons/`. |
 | Bar pin doesn't update instantly | Make sure your Waybar module def has `"signal": 8` (the bundled `codexbar.jsonc` already does). |
 
@@ -222,8 +253,6 @@ The Waybar module emits one of these classes; style them in
 
 - Auto-dismiss the popover on outside click (today: ESC, `✕`, or clicking the
   bar icon).
-- Dark-mode palette (auto-detect from `gsettings color-scheme` or HyDE
-  wallbash).
 - AUR `PKGBUILD` for one-shot install on Arch.
 - Optional Quickshell variant for compositors without Waybar.
 

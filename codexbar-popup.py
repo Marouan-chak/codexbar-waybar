@@ -4,7 +4,7 @@
 Mirrors the macOS CodexBar menu popover: a provider tab strip at the top,
 the active provider's usage windows shown as flat sections separated by
 hairline dividers, no card boxes, thin progress bars, light translucent
-background, dark text.
+background, and text colors that follow the local light/dark preference.
 
 Anchored top-right via gtk4-layer-shell. Reads the cached last.json for
 instant paint, then refetches in the background.
@@ -19,6 +19,7 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
+from string import Template
 from threading import Thread
 
 # gtk4-layer-shell must load before libwayland-client; re-exec with LD_PRELOAD.
@@ -49,6 +50,7 @@ from gi.repository import GLib, Gtk, Gtk4LayerShell  # noqa: E402
 
 CODEXBAR = os.environ.get("CODEXBAR_BIN", str(Path.home() / ".local/bin/codexbar"))
 CACHE = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "codexbar-waybar"
+CURRENT = CACHE / "current.json"
 LAST_GOOD = CACHE / "last.json"
 SCRIPT_DIR = Path(__file__).resolve().parent
 WRAPPER = SCRIPT_DIR / "codexbar.sh"
@@ -64,6 +66,10 @@ PROVIDER_NAMES = {
     "openai": "OpenAI",
     "kimik2": "Kimi K2",
     "antigravity": "Antigravity",
+    "grok": "Grok",
+    "commandcode": "Command Code",
+    "opencode": "OpenCode",
+    "opencodego": "OpenCode Go",
 }
 
 WINDOW_LABELS = {
@@ -86,7 +92,7 @@ PROVIDER_ICON_ALIAS = {
 LINUX_SUPPORTED = {
     "codex", "claude", "gemini", "copilot", "kilo", "openrouter", "deepseek",
     "moonshot", "codebuff", "zai", "warp", "venice", "crof", "minimax",
-    "kimik2", "vertexai", "antigravity",
+    "kimik2", "vertexai", "antigravity", "grok", "commandcode", "opencodego",
 }
 
 CONFIG_PATH = Path.home() / ".codexbar" / "config.json"
@@ -97,10 +103,96 @@ ICONS_DIR = Path(
     os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share"))
 ) / "codexbar-waybar" / "icons"
 
-# CSS mirrors the macOS menu popover: light translucent panel, dark text,
+THEME_PALETTES = {
+    "light": {
+        "panel_bg": "#ffffff",
+        "text": "#111111",
+        "muted_text": "#6b6b6b",
+        "detail_text": "#2b2b2b",
+        "disabled_text": "#9a9a9a",
+        "border": "#d0d0d0",
+        "divider": "#e5e5e5",
+        "row_divider": "#f0f0f0",
+        "hover_bg": "#ececec",
+        "active_bg": "#0a84ff",
+        "active_text": "#ffffff",
+        "error_text": "#c53030",
+        "warning": "#ff9f0a",
+        "critical": "#ff453a",
+        "progress_empty": "#e5e5e5",
+    },
+    "dark": {
+        "panel_bg": "#1c1c1e",
+        "text": "#f5f5f7",
+        "muted_text": "#a1a1a6",
+        "detail_text": "#d1d1d6",
+        "disabled_text": "#636366",
+        "border": "#3a3a3c",
+        "divider": "#2c2c2e",
+        "row_divider": "#2c2c2e",
+        "hover_bg": "#2c2c2e",
+        "active_bg": "#0a84ff",
+        "active_text": "#ffffff",
+        "error_text": "#ff6961",
+        "warning": "#ff9f0a",
+        "critical": "#ff453a",
+        "progress_empty": "#3a3a3c",
+    },
+}
+
+
+def normalize_color_scheme(value: str | None) -> str | None:
+    if not value:
+        return None
+    value = value.strip().strip("'\"").lower()
+    if value in {"dark", "prefer-dark", "1", "true", "yes"}:
+        return "dark"
+    if value in {"light", "prefer-light", "default", "0", "false", "no"}:
+        return "light"
+    return None
+
+
+def current_color_scheme() -> str:
+    """Resolve popup colour scheme without touching remote or provider state."""
+    env_scheme = normalize_color_scheme(os.environ.get("CODEXBAR_COLOR_SCHEME"))
+    if env_scheme:
+        return env_scheme
+
+    try:
+        result = subprocess.run(
+            ["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
+            capture_output=True,
+            text=True,
+            timeout=1,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return "light"
+
+    if result.returncode == 0:
+        return normalize_color_scheme(result.stdout) or "light"
+    return "light"
+
+
+# CSS mirrors the macOS menu popover: translucent panel, themed text,
 # thin hairline dividers, no card boxes, restrained accent only on the
 # active provider tab.
-CSS = b"""
+CSS_TEMPLATE = """
+@define-color codexbar_panel_bg $panel_bg;
+@define-color codexbar_text $text;
+@define-color codexbar_muted_text $muted_text;
+@define-color codexbar_detail_text $detail_text;
+@define-color codexbar_disabled_text $disabled_text;
+@define-color codexbar_border $border;
+@define-color codexbar_divider $divider;
+@define-color codexbar_row_divider $row_divider;
+@define-color codexbar_hover_bg $hover_bg;
+@define-color codexbar_active_bg $active_bg;
+@define-color codexbar_active_text $active_text;
+@define-color codexbar_error_text $error_text;
+@define-color codexbar_warning $warning;
+@define-color codexbar_critical $critical;
+@define-color codexbar_progress_empty $progress_empty;
+
 /* The window itself stays transparent so the root box can paint rounded corners. */
 window.codexbar-popup {
     background-color: transparent;
@@ -108,27 +200,27 @@ window.codexbar-popup {
 }
 
 .codexbar-root {
-    background-color: #ffffff;
+    background-color: @codexbar_panel_bg;
     background-image: none;
-    color: #111111;
+    color: @codexbar_text;
     border-radius: 14px;
-    border: 1px solid #d0d0d0;
+    border: 1px solid @codexbar_border;
     padding: 0;
-    min-width: 360px;
+    min-width: 420px;
 }
 
-/* Force every child of the root to inherit the white panel (Adwaita ships a lot
+/* Force every child of the root to inherit the panel (Adwaita ships a lot
    of toolbar/headerbar styling that paints over our background). */
 .codexbar-root > * {
-    background-color: #ffffff;
+    background-color: @codexbar_panel_bg;
     background-image: none;
 }
 
 /* --- Tab strip --- */
 .codexbar-tabbar {
-    background-color: #ffffff;
+    background-color: @codexbar_panel_bg;
     padding: 8px 10px 6px 10px;
-    border-bottom: 1px solid #e5e5e5;
+    border-bottom: 1px solid @codexbar_divider;
     border-top-left-radius: 14px;
     border-top-right-radius: 14px;
 }
@@ -137,108 +229,120 @@ window.codexbar-popup {
 .codexbar-tab {
     padding: 5px 12px;
     border-radius: 8px;
-    color: #6b6b6b;
+    color: @codexbar_muted_text;
     font-size: 12px;
     font-weight: 600;
     background-color: transparent;
 }
 .codexbar-tab:hover {
-    background-color: #ececec;
-    color: #111111;
+    background-color: @codexbar_hover_bg;
+    color: @codexbar_text;
 }
 .codexbar-tab.active,
 .codexbar-tab.active:hover {
-    background-color: #0a84ff;
-    color: #ffffff;
+    background-color: @codexbar_active_bg;
+    color: @codexbar_active_text;
 }
-.codexbar-tab label { color: inherit; font-size: 12px; font-weight: 600; }
+.codexbar-tab label {
+    color: inherit;
+}
+.codexbar-tab label.codexbar-tab-title {
+    font-size: 12px;
+    font-weight: 600;
+}
+.codexbar-tab label.codexbar-tab-subtitle {
+    font-size: 10px;
+    font-weight: 500;
+    opacity: 0.78;
+}
 
 .codexbar-iconbtn {
     padding: 5px 9px;
     border-radius: 8px;
-    color: #6b6b6b;
+    color: @codexbar_muted_text;
     font-size: 13px;
     background-color: transparent;
 }
 .codexbar-iconbtn:hover {
-    background-color: #ececec;
-    color: #111111;
+    background-color: @codexbar_hover_bg;
+    color: @codexbar_text;
 }
 .codexbar-iconbtn label { color: inherit; font-size: 13px; }
 
 /* --- Body --- */
 .codexbar-body {
-    background-color: #ffffff;
+    background-color: @codexbar_panel_bg;
     padding: 14px 18px 6px 18px;
+    min-height: 360px;
 }
 
 .codexbar-provider-title {
     font-size: 18px;
     font-weight: 700;
-    color: #111111;
+    color: @codexbar_text;
 }
 .codexbar-plan {
     font-size: 11px;
     font-weight: 600;
-    color: #6b6b6b;
+    color: @codexbar_muted_text;
 }
 .codexbar-subtitle {
     font-size: 11px;
-    color: #6b6b6b;
+    color: @codexbar_muted_text;
 }
 .codexbar-divider {
-    background-color: #e5e5e5;
+    background-color: @codexbar_divider;
     min-height: 1px;
     margin: 12px 0;
 }
 .codexbar-section-title {
     font-size: 13px;
     font-weight: 700;
-    color: #111111;
+    color: @codexbar_text;
     margin-bottom: 6px;
 }
 .codexbar-section-detail-left {
     font-size: 11px;
-    color: #2b2b2b;
+    color: @codexbar_detail_text;
     font-feature-settings: "tnum";
 }
 .codexbar-section-detail-right {
     font-size: 11px;
-    color: #6b6b6b;
+    color: @codexbar_muted_text;
 }
 .codexbar-credits {
     font-size: 13px;
-    color: #111111;
+    color: @codexbar_text;
     font-feature-settings: "tnum";
     font-weight: 600;
 }
 .codexbar-credits-label {
     font-size: 11px;
-    color: #6b6b6b;
+    color: @codexbar_muted_text;
 }
 .codexbar-error {
     font-size: 12px;
-    color: #c53030;
+    color: @codexbar_error_text;
 }
 
 /* --- Footer --- */
 .codexbar-footer {
-    background-color: #ffffff;
+    background-color: @codexbar_panel_bg;
     padding: 7px 10px 9px 10px;
-    border-top: 1px solid #e5e5e5;
+    border-top: 1px solid @codexbar_divider;
     border-bottom-left-radius: 14px;
     border-bottom-right-radius: 14px;
 }
 .codexbar-footer-btn {
     padding: 4px 10px;
     border-radius: 6px;
-    color: #2b2b2b;
+    color: @codexbar_detail_text;
     font-size: 12px;
     background-color: transparent;
 }
 .codexbar-footer-btn:hover {
-    background-color: #ececec;
-    color: #111111;
+    background-color: @codexbar_hover_bg;
+    color: @codexbar_text;
 }
 .codexbar-footer-btn label { color: inherit; font-size: 12px; }
 
@@ -246,10 +350,10 @@ window.codexbar-popup {
 .codexbar-settings-title {
     font-size: 13px;
     font-weight: 600;
-    color: #111111;
+    color: @codexbar_text;
 }
 .codexbar-bar-picker {
-    background-color: #ffffff;
+    background-color: @codexbar_panel_bg;
     padding: 4px 0 8px 0;
 }
 .codexbar-provider-icon {
@@ -257,28 +361,28 @@ window.codexbar-popup {
     margin: 0 2px;
 }
 .codexbar-settings-list {
-    background-color: #ffffff;
+    background-color: @codexbar_panel_bg;
 }
 .codexbar-settings-row {
     padding: 8px 0;
-    border-bottom: 1px solid #f0f0f0;
+    border-bottom: 1px solid @codexbar_row_divider;
 }
 .codexbar-settings-row.disabled .codexbar-settings-name {
-    color: #9a9a9a;
+    color: @codexbar_disabled_text;
 }
 .codexbar-settings-name {
     font-size: 13px;
     font-weight: 600;
-    color: #111111;
+    color: @codexbar_text;
 }
 .codexbar-settings-hint {
     font-size: 11px;
-    color: #9a9a9a;
+    color: @codexbar_disabled_text;
 }
 .codexbar-settings-group {
     font-size: 11px;
     font-weight: 600;
-    color: #6b6b6b;
+    color: @codexbar_muted_text;
     padding: 14px 0 4px 0;
 }
 
@@ -294,16 +398,16 @@ levelbar.codex-usage trough {
     border: none;
 }
 levelbar.codex-usage block.filled {
-    background-color: #0a84ff;
+    background-color: @codexbar_active_bg;
     background-image: none;
     min-height: 4px;
     border-radius: 2px;
     border: none;
 }
-levelbar.codex-usage.warning block.filled  { background-color: #ff9f0a; }
-levelbar.codex-usage.critical block.filled { background-color: #ff453a; }
+levelbar.codex-usage.warning block.filled  { background-color: @codexbar_warning; }
+levelbar.codex-usage.critical block.filled { background-color: @codexbar_critical; }
 levelbar.codex-usage block.empty {
-    background-color: #e5e5e5;
+    background-color: @codexbar_progress_empty;
     background-image: none;
     min-height: 4px;
     border-radius: 2px;
@@ -312,12 +416,19 @@ levelbar.codex-usage block.empty {
 """
 
 
+def build_css(color_scheme: str) -> bytes:
+    return Template(CSS_TEMPLATE).substitute(THEME_PALETTES[color_scheme]).encode()
+
+
 def load_cached() -> list:
-    if LAST_GOOD.exists():
+    for path in (CURRENT, LAST_GOOD):
+        if not path.exists():
+            continue
         try:
-            return json.loads(LAST_GOOD.read_text())
+            data = json.loads(path.read_text())
+            return data if isinstance(data, list) else []
         except json.JSONDecodeError:
-            return []
+            continue
     return []
 
 
@@ -335,38 +446,50 @@ def save_state(state: dict) -> None:
     STATE_PATH.write_text(json.dumps(state, indent=2) + "\n")
 
 
-_ICON_CACHE: dict[str, Path] = {}
+_ICON_CACHE: dict[tuple[str, str], Path] = {}
+_SVG_MASK_COLOR = r"(?:white|black|currentColor|#fff(?:fff)?|#000(?:000)?|#111111|#1a1a18|#211e1e|#34322d)"
+_SVG_MASK_ATTR = re.compile(
+    rf"((?:fill|stroke)\s*=\s*[\"'])({_SVG_MASK_COLOR})([\"'])",
+    re.IGNORECASE,
+)
+_SVG_MASK_STYLE = re.compile(
+    rf"((?:fill|stroke)\s*:\s*)({_SVG_MASK_COLOR})(\s*[;}}])",
+    re.IGNORECASE,
+)
 
 
-def resolve_icon_path(pid: str) -> Path | None:
-    """Return a recoloured copy of the provider SVG (dark text colour) so it
-    renders against the popup's light background. Upstream SVGs use
-    `fill=\"white\"`; we substitute that with our theme dark and cache."""
+def _recolour_svg(svg: str, color: str) -> str:
+    svg = _SVG_MASK_ATTR.sub(rf"\1{color}\3", svg)
+    return _SVG_MASK_STYLE.sub(rf"\1{color}\3", svg)
+
+
+def _icon_cache_suffix(color: str) -> str:
+    return re.sub(r"[^0-9a-zA-Z]+", "", color).lower() or "theme"
+
+
+def resolve_icon_path(pid: str, color: str) -> Path | None:
+    """Return a recoloured copy of the provider SVG for the selected text colour."""
     name = PROVIDER_ICON_ALIAS.get(pid, pid)
-    if name in _ICON_CACHE:
-        return _ICON_CACHE[name]
+    cache_key = (name, _icon_cache_suffix(color))
+    if cache_key in _ICON_CACHE:
+        return _ICON_CACHE[cache_key]
     src = ICONS_DIR / f"ProviderIcon-{name}.svg"
     if not src.exists():
         return None
     out_dir = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "codexbar-waybar" / "icons"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / f"{name}.svg"
+    out = out_dir / f"{name}-{cache_key[1]}.svg"
     try:
         svg = src.read_text()
-        # Recolour mask-style SVGs (single white path) to dark theme text.
-        recoloured = svg.replace('fill="white"', 'fill="#1c1c1e"') \
-                        .replace("fill='white'", "fill='#1c1c1e'") \
-                        .replace('fill="#ffffff"', 'fill="#1c1c1e"') \
-                        .replace('fill="#FFFFFF"', 'fill="#1c1c1e"')
-        out.write_text(recoloured)
-        _ICON_CACHE[name] = out
+        out.write_text(_recolour_svg(svg, color))
+        _ICON_CACHE[cache_key] = out
         return out
     except OSError:
         return None
 
 
-def make_icon(pid: str, size: int = 18) -> Gtk.Widget | None:
-    path = resolve_icon_path(pid)
+def make_icon(pid: str, size: int = 18, *, color: str) -> Gtk.Widget | None:
+    path = resolve_icon_path(pid, color)
     if path is None:
         return None
     img = Gtk.Image.new_from_file(str(path))
@@ -572,6 +695,8 @@ class CodexBarPopup(Gtk.Application):
         self.tab_buttons: dict[str, Gtk.Button] = {}
         self.view: str = "usage"             # "usage" | "settings"
         self.settings_switches: dict[str, Gtk.Switch] = {}
+        self.color_scheme = current_color_scheme()
+        self.theme = THEME_PALETTES[self.color_scheme]
 
     def do_activate(self):  # noqa: N802
         if self.window is None:
@@ -579,25 +704,44 @@ class CodexBarPopup(Gtk.Application):
         self.window.present()
 
     def _make_pill(self, label: str, css_classes: list[str], on_click,
-                   *, icon_pid: str | None = None) -> Gtk.Widget:
+                   *, icon_pid: str | None = None,
+                   subtitle: str | None = None) -> Gtk.Widget:
         """A clickable pill made from Gtk.Box + Gtk.Label so we bypass
         Gtk.Button styling. Optionally prefixes a provider SVG icon."""
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         box.set_css_classes(css_classes)
         if icon_pid:
-            icon = make_icon(icon_pid, size=14)
+            icon = make_icon(icon_pid, size=14, color=self._icon_color(css_classes))
             if icon is not None:
                 box.append(icon)
-        lbl = Gtk.Label(label=label)
-        box.append(lbl)
+        if subtitle:
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            title = Gtk.Label(label=label, xalign=0.0)
+            title.add_css_class("codexbar-tab-title")
+            text.append(title)
+            sub = Gtk.Label(label=subtitle, xalign=0.0)
+            sub.add_css_class("codexbar-tab-subtitle")
+            text.append(sub)
+            box.append(text)
+        else:
+            lbl = Gtk.Label(label=label)
+            lbl.add_css_class("codexbar-tab-title")
+            box.append(lbl)
         gesture = Gtk.GestureClick()
         gesture.connect("released", lambda _g, _n, _x, _y: on_click())
         box.add_controller(gesture)
         return box
 
+    def _icon_color(self, css_classes: list[str]) -> str:
+        if "active" in css_classes:
+            return self.theme["active_text"]
+        if "codexbar-tab" in css_classes:
+            return self.theme["muted_text"]
+        return self.theme["text"]
+
     def build_window(self) -> Gtk.Window:
         provider = Gtk.CssProvider()
-        provider.load_from_data(CSS)
+        provider.load_from_data(build_css(self.color_scheme))
         Gtk.StyleContext.add_provider_for_display(
             Gtk.Window().get_display(),
             provider,
@@ -623,6 +767,7 @@ class CodexBarPopup(Gtk.Application):
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         root.add_css_class("codexbar-root")
+        root.set_size_request(420, -1)
         win.set_child(root)
 
         self.tabbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
@@ -631,6 +776,7 @@ class CodexBarPopup(Gtk.Application):
 
         self.body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.body.add_css_class("codexbar-body")
+        self.body.set_size_request(-1, 360)
         root.append(self.body)
 
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
@@ -806,7 +952,7 @@ class CodexBarPopup(Gtk.Application):
             list_box.append(self._settings_row(pid, existing.get(pid, False), enabled_ui=True))
 
         if unsupported:
-            divider_label = Gtk.Label(label="macOS-only providers", xalign=0.0)
+            divider_label = Gtk.Label(label="Unavailable on Linux", xalign=0.0)
             divider_label.add_css_class("codexbar-settings-group")
             list_box.append(divider_label)
             for pid in unsupported:
@@ -818,6 +964,39 @@ class CodexBarPopup(Gtk.Application):
             xalign=0.0, wrap=True)
         note.add_css_class("codexbar-subtitle")
         self.body.append(note)
+
+    @staticmethod
+    def _format_pct(value: float) -> str:
+        rounded = round(value, 1)
+        return str(int(rounded)) if rounded.is_integer() else f"{rounded:.1f}"
+
+    def _entry_for_provider(self, pid: str) -> dict | None:
+        return next((entry for entry in self.data if entry.get("provider") == pid), None)
+
+    def _bar_chip_subtitle(self, pid: str | None) -> str:
+        if pid is None:
+            healthy = [entry for entry in self.data if not entry.get("error")]
+            if not healthy:
+                return "Highest usage"
+            max_entry = max(healthy, key=max_pct)
+            pct = max_pct(max_entry)
+            name = PROVIDER_NAMES.get(max_entry.get("provider", ""), "Provider")
+            return f"{name} {self._format_pct(pct)}% used"
+
+        entry = self._entry_for_provider(pid)
+        if not entry:
+            return "No data yet"
+        if entry.get("error"):
+            return "Needs setup"
+
+        usage = entry.get("usage") or {}
+        for key, label in (("secondary", "weekly"), ("primary", "current"), ("tertiary", "monthly")):
+            window = usage.get(key) or {}
+            pct = window.get("usedPercent")
+            if isinstance(pct, (int, float)):
+                remaining = max(0.0, min(100.0, 100.0 - float(pct)))
+                return f"{self._format_pct(remaining)}% {label} left"
+        return "No usage yet"
 
     def _build_bar_provider_picker(self, existing: dict[str, bool]) -> Gtk.Widget:
         wrap = Gtk.FlowBox()
@@ -834,7 +1013,8 @@ class CodexBarPopup(Gtk.Application):
             chip = self._make_pill(
                 label, classes,
                 lambda p=pid: self._on_bar_provider_change(p),
-                icon_pid=pid)
+                icon_pid=pid,
+                subtitle=self._bar_chip_subtitle(pid))
             return chip
 
         wrap.append(make_chip(None, "Highest"))
@@ -891,7 +1071,8 @@ class CodexBarPopup(Gtk.Application):
         if not enabled_ui:
             row.add_css_class("disabled")
 
-        icon = make_icon(pid, size=18)
+        icon_color = self.theme["text"] if enabled_ui else self.theme["disabled_text"]
+        icon = make_icon(pid, size=18, color=icon_color)
         if icon is not None:
             row.append(icon)
 

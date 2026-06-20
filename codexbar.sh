@@ -15,10 +15,14 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 CODEXBAR="${CODEXBAR_BIN:-${HOME}/.local/bin/codexbar}"
+COMMANDCODE_HELPER="${SCRIPT_DIR}/codexbar-commandcode-api.py"
+OPENCODEGO_HELPER="${SCRIPT_DIR}/codexbar-opencodego-local.py"
+PROVIDER_TIMEOUT_SECS="${CODEXBAR_PROVIDER_TIMEOUT:-25}"
 CONFIG_PATH="${HOME}/.codexbar/config.json"
 STATE_PATH="${XDG_CONFIG_HOME:-${HOME}/.config}/codexbar-waybar/state.json"
 CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/codexbar-waybar"
 mkdir -p "$CACHE_DIR"
+CURRENT_JSON="$CACHE_DIR/current.json"
 
 # Per-instance bar provider selection (written by the popup's Settings view).
 # `null` (or unset) means "show the highest used% across providers".
@@ -128,40 +132,77 @@ declare -A SOURCE_OVERRIDES=(
     [claude]=oauth
 )
 
-# If the primary source returns a provider-level error (e.g. Claude OAuth
-# hitting HTTP 429), fall back to this source. Mostly useful for Claude
-# where the local CLI logs have the same windowing data.
-declare -A FALLBACK_SOURCES=(
-    [claude]=cli
-)
+# Optional per-provider fallback source. Keep this empty by default on Linux:
+# Claude's CLI source can spawn interactive CLI/MCP sessions and mask auth
+# errors as timeouts.
+declare -A FALLBACK_SOURCES=()
 
-# Antigravity has no Linux login flow in the CLI: it expects Google OAuth
-# credentials at ~/.codexbar/antigravity/oauth_creds.json (written by the macOS
-# app), or passed inline via $ANTIGRAVITY_OAUTH_CREDENTIALS_JSON. On Linux the
-# Antigravity CLI (`agy`) logs in through the shared Gemini flow and drops the
-# same Google creds at ~/.gemini/oauth_creds.json. Bridge that file into the
-# env var so an `agy` login satisfies codexbar without a second login.
-# Override the source path with $CODEXBAR_ANTIGRAVITY_CREDS.
-ANTIGRAVITY_CREDS="${CODEXBAR_ANTIGRAVITY_CREDS:-${HOME}/.gemini/oauth_creds.json}"
+# Antigravity accepts inline OAuth creds via $ANTIGRAVITY_OAUTH_CREDENTIALS_JSON.
+# Prefer explicit creds, then ai-router's Antigravity auth store when present,
+# and finally the Gemini/agy OAuth file used by the local CLI probe.
+default_antigravity_creds() {
+    local ai_router_dir="${XDG_DATA_HOME:-${HOME}/.local/share}/ai-router/auths"
+    local path
+    for path in "$ai_router_dir"/antigravity-*.json; do
+        [[ -f "$path" ]] || continue
+        echo "$path"
+        return
+    done
+    echo "${HOME}/.gemini/oauth_creds.json"
+}
+
+ANTIGRAVITY_CREDS="${CODEXBAR_ANTIGRAVITY_CREDS:-$(default_antigravity_creds)}"
+
+antigravity_creds_support_oauth_source() {
+    local path="$1"
+    [[ -f "$path" ]] || return 1
+    command -v jq >/dev/null 2>&1 || return 1
+    jq -e '(.type == "antigravity") or ((.project_id // "") | length > 0)' "$path" >/dev/null 2>&1
+}
+
+ANTIGRAVITY_SOURCE="${CODEXBAR_ANTIGRAVITY_SOURCE:-}"
+if [[ -z "$ANTIGRAVITY_SOURCE" ]] && antigravity_creds_support_oauth_source "$ANTIGRAVITY_CREDS"; then
+    ANTIGRAVITY_SOURCE="oauth"
+fi
+[[ -n "$ANTIGRAVITY_SOURCE" ]] && SOURCE_OVERRIDES[antigravity]="$ANTIGRAVITY_SOURCE"
 
 fetch_one() {
     local p="$1" src="$2"
+    case "$p" in
+        commandcode)
+            if [[ -x "$COMMANDCODE_HELPER" ]]; then
+                "$COMMANDCODE_HELPER" 2>/dev/null
+                return
+            fi
+            ;;
+        opencodego)
+            if [[ -x "$OPENCODEGO_HELPER" ]]; then
+                "$OPENCODEGO_HELPER" 2>/dev/null
+                return
+            fi
+            ;;
+    esac
+
     local args=(usage --provider "$p" --format json --no-color)
     [[ -n "$src" ]] && args+=(--source "$src")
+    local cmd=("$CODEXBAR" "${args[@]}")
+    if command -v timeout >/dev/null 2>&1; then
+        cmd=(timeout --kill-after=2s "${PROVIDER_TIMEOUT_SECS}s" "${cmd[@]}")
+    fi
     if [[ "$p" == "antigravity" ]]; then
         if [[ -z "${ANTIGRAVITY_OAUTH_CREDENTIALS_JSON:-}" && -f "$ANTIGRAVITY_CREDS" ]]; then
             CUSTOM_CA_BUNDLE="${ANTIGRAVITY_CUSTOM_CA_BUNDLE:-}" \
             LD_PRELOAD="${ANTIGRAVITY_LD_PRELOAD:-}" \
             ANTIGRAVITY_OAUTH_CREDENTIALS_JSON="$(cat "$ANTIGRAVITY_CREDS")" \
-                "$CODEXBAR" "${args[@]}" 2>/dev/null
+                "${cmd[@]}" 2>/dev/null
         else
             CUSTOM_CA_BUNDLE="${ANTIGRAVITY_CUSTOM_CA_BUNDLE:-}" \
             LD_PRELOAD="${ANTIGRAVITY_LD_PRELOAD:-}" \
-                "$CODEXBAR" "${args[@]}" 2>/dev/null
+                "${cmd[@]}" 2>/dev/null
         fi
         return
     fi
-    "$CODEXBAR" "${args[@]}" 2>/dev/null
+    "${cmd[@]}" 2>/dev/null
 }
 
 fetch_provider() {
@@ -171,6 +212,13 @@ fetch_provider() {
 
     local body fallback_body
     body="$(fetch_one "$p" "$primary")"
+
+    if [[ -z "$body" && -n "$fallback" && "$fallback" != "$primary" ]]; then
+        fallback_body="$(fetch_one "$p" "$fallback")"
+        if echo "$fallback_body" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            body="$fallback_body"
+        fi
+    fi
 
     # Only retry when the response is a valid array with a provider-level
     # error — network failures and rate limits land here. Auth misconfig
@@ -182,6 +230,13 @@ fetch_provider() {
         if echo "$fallback_body" | jq -e 'type == "array"' >/dev/null 2>&1; then
             body="$fallback_body"
         fi
+    fi
+
+    if [[ -z "$body" ]]; then
+        body="$(jq -cn \
+            --arg provider "$p" \
+            --arg message "provider timed out or returned no data" \
+            '[{provider: $provider, error: {kind: "provider", code: 124, message: $message}}]')"
     fi
 
     echo "$body"
@@ -277,6 +332,10 @@ if [[ -n "$last_good_json" ]]; then
     ' <<< "$merged")"
 fi
 
+if echo "$merged" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    echo "$merged" > "$CURRENT_JSON"
+fi
+
 if [[ "$merged" == "[]" ]]; then
     printf '{"text":"","tooltip":"CodexBar: no provider data","class":"stale","percentage":0}\n'
     exit 0
@@ -291,7 +350,8 @@ echo "$merged" | jq -c \
         {codex:"Codex", claude:"Claude", gemini:"Gemini",
          copilot:"Copilot", openai:"OpenAI", cursor:"Cursor",
          vertexai:"Vertex AI", openrouter:"OpenRouter",
-         antigravity:"Antigravity"}[p] // (p | ascii_upcase);
+         antigravity:"Antigravity", grok:"Grok",
+         commandcode:"Command Code", opencodego:"OpenCode Go"}[p] // (p | ascii_upcase);
 
     # Insert spaces the providers omit. Claude OAuth gives "May 17 at 6:20AM"
     # (no space before AM/PM); Claude CLI gives "Resets6:20am(Europe/Paris)"
@@ -348,9 +408,14 @@ echo "$merged" | jq -c \
                end
         end;
 
+    def fmt_pct:
+        if type == "number" then
+            (((. * 10) | round) / 10 | tostring | sub("\\.0$"; ""))
+        else tostring end;
+
     def fmt_window(w; name):
         if w == null or w.usedPercent == null then empty
-        else "\(name): \(w.usedPercent)%" + reset_phrase(w)
+        else "\(name): \(w.usedPercent | fmt_pct)%" + reset_phrase(w)
         end;
 
     def provider_lines(entry):
@@ -400,7 +465,7 @@ echo "$merged" | jq -c \
     | {
         text: (if $pinned != null then bar_text($pinned)
                elif $all_errored then "🤖 ⚠"
-               else "🤖 \($pct)%" end),
+               else "🤖 \($pct | fmt_pct)%" end),
         tooltip: ($lines | join("\n")),
         class: (if $all_errored then "stale"
                 elif $pct >= 90 then "critical"
