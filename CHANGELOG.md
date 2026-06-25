@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Limit rendered usage percentages to two decimal places in Waybar text and
+  tooltips.
+
 ## [0.3.1] — 2026-06-03
 
 ### Changed
