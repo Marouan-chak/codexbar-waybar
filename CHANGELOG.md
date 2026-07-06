@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-07-06
+
+### Added
+- **CodexBar 0.40.0 provider surface.** Provider names and settings now track
+  the full upstream Linux CLI config surface, including newer providers such as
+  Chutes, ClawRouter, CrossModel, Deepgram, Groq, LiteLLM, LLM Proxy, Poe,
+  Qoder, Sakana AI, T3 Chat, and Zed.
+- **Current upstream payload details.** The tooltip and popover now render
+  status, pace summaries, named extra quota windows, Codex reset-credit expiry
+  inventory, provider cost/budget data, OpenAI dashboard credits, provider
+  balances, and subscription dates when the CLI reports them.
+- **Updated provider icons.** The bundled upstream CodexBar icon set now
+  includes 52 provider marks and is installed for the popover tabs/settings
+  rows.
+- `CODEXBAR_PROVIDER_TIMEOUT` to bound each provider CLI probe. It defaults to
+  20 seconds and can be set to `0` to disable the timeout.
+
+### Changed
+- Settings uses `codexbar config dump` as the authority for selectable
+  providers instead of a stale hand-maintained Linux-supported subset.
+- Cached provider snapshots are keyed by provider plus account label, so
+  multi-account upstream payloads can remain visible independently during
+  transient refresh failures.
+
 ## [0.3.1] — 2026-06-03
 
 ### Changed
@@ -122,7 +146,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Waybar entry.
 - `install.sh` — idempotent installer.
 
-[Unreleased]: https://github.com/Marouan-chak/codexbar-waybar/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/Marouan-chak/codexbar-waybar/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Marouan-chak/codexbar-waybar/releases/tag/v0.4.0
 [0.3.1]: https://github.com/Marouan-chak/codexbar-waybar/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Marouan-chak/codexbar-waybar/releases/tag/v0.3.0
 [0.2.1]: https://github.com/Marouan-chak/codexbar-waybar/releases/tag/v0.2.1

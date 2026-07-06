@@ -54,16 +54,63 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 WRAPPER = SCRIPT_DIR / "codexbar.sh"
 
 PROVIDER_NAMES = {
+    "abacus": "Abacus AI",
+    "alibaba": "Alibaba",
+    "alibabatokenplan": "Alibaba Token Plan",
+    "amp": "Amp",
+    "antigravity": "Antigravity",
+    "augment": "Augment",
+    "azureopenai": "Azure OpenAI",
+    "bedrock": "AWS Bedrock",
+    "chutes": "Chutes",
+    "clawrouter": "ClawRouter",
+    "codebuff": "Codebuff",
     "codex": "Codex",
     "claude": "Claude",
-    "gemini": "Gemini",
+    "commandcode": "Command Code",
     "copilot": "Copilot",
+    "crof": "Crof",
+    "crossmodel": "CrossModel",
     "cursor": "Cursor",
-    "vertexai": "Vertex AI",
-    "openrouter": "OpenRouter",
-    "openai": "OpenAI",
+    "deepgram": "Deepgram",
+    "deepseek": "DeepSeek",
+    "devin": "Devin",
+    "doubao": "Doubao",
+    "elevenlabs": "ElevenLabs",
+    "factory": "Droid",
+    "gemini": "Gemini",
+    "grok": "Grok",
+    "groq": "Groq",
+    "jetbrains": "JetBrains AI",
+    "kilo": "Kilo",
+    "kimi": "Kimi",
     "kimik2": "Kimi K2",
-    "antigravity": "Antigravity",
+    "kiro": "Kiro",
+    "litellm": "LiteLLM",
+    "llmproxy": "LLM Proxy",
+    "manus": "Manus",
+    "mimo": "Xiaomi MiMo",
+    "minimax": "MiniMax",
+    "mistral": "Mistral",
+    "moonshot": "Moonshot / Kimi API",
+    "ollama": "Ollama",
+    "openai": "OpenAI",
+    "opencode": "OpenCode",
+    "opencodego": "OpenCode Go",
+    "openrouter": "OpenRouter",
+    "perplexity": "Perplexity",
+    "poe": "Poe",
+    "qoder": "Qoder",
+    "sakana": "Sakana AI",
+    "stepfun": "StepFun",
+    "synthetic": "Synthetic",
+    "t3chat": "T3 Chat",
+    "venice": "Venice",
+    "vertexai": "Vertex AI",
+    "warp": "Warp",
+    "windsurf": "Windsurf",
+    "zai": "z.ai",
+    "zed": "Zed",
 }
 
 WINDOW_LABELS = {
@@ -76,17 +123,10 @@ WINDOW_LABELS = {
 # Most providers map to their own id; a few share an icon upstream.
 PROVIDER_ICON_ALIAS = {
     "openai": "codex",
+    "azureopenai": "codex",
+    "alibabatokenplan": "alibaba",
     "moonshot": "kimi",
     "kimik2": "kimi",
-}
-
-# Providers that have at least one non-web Linux path (OAuth, API key, CLI,
-# local probe). Everything else either requires browser cookies or is gated to
-# macOS in the upstream CLI.
-LINUX_SUPPORTED = {
-    "codex", "claude", "gemini", "copilot", "kilo", "openrouter", "deepseek",
-    "moonshot", "codebuff", "zai", "warp", "venice", "crof", "minimax",
-    "kimik2", "vertexai", "antigravity",
 }
 
 CONFIG_PATH = Path.home() / ".codexbar" / "config.json"
@@ -473,13 +513,237 @@ def max_pct(entry: dict) -> int:
     return int(max(pcts)) if pcts else 0
 
 
+def provider_label(pid: str) -> str:
+    return PROVIDER_NAMES.get(pid, pid.replace("-", " ").title())
+
+
+def entry_key(entry: dict) -> str:
+    provider = entry.get("provider") or "unknown"
+    account = entry.get("account")
+    if account:
+        return f"{provider}\0{account}"
+    identity = ((entry.get("usage") or {}).get("identity") or {})
+    identity_account = identity.get("accountEmail") or identity.get("accountOrganization")
+    if identity_account:
+        return f"{provider}\0{identity_account}"
+    return str(provider)
+
+
+def entry_label(entry: dict, all_entries: list | None = None) -> str:
+    pid = str(entry.get("provider") or "unknown")
+    label = provider_label(pid)
+    if all_entries is not None:
+        duplicates = sum(1 for other in all_entries if other.get("provider") == pid)
+        if duplicates <= 1:
+            return label
+    account = entry.get("account")
+    identity = ((entry.get("usage") or {}).get("identity") or {})
+    account = account or identity.get("accountEmail") or identity.get("accountOrganization")
+    return f"{label} · {account}" if account else label
+
+
+def money(value: float, currency: str = "USD") -> str:
+    symbol = "$" if currency.upper() == "USD" else f"{currency.upper()} "
+    return f"{symbol}{value:,.2f}"
+
+
+def compact_number(value: int | float) -> str:
+    if isinstance(value, int) or float(value).is_integer():
+        return f"{int(value):,}"
+    return f"{float(value):,.2f}"
+
+
+def parse_iso_datetime(value: str | None) -> datetime.datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+
+
+def format_datetime_label(value: str | None) -> str:
+    ts = parse_iso_datetime(value)
+    if ts is None:
+        return ""
+    ts = ts.astimezone()
+    now = datetime.datetime.now(ts.tzinfo)
+    if ts.date() == now.date():
+        return ts.strftime("%-I:%M %p %Z")
+    if ts.year == now.year:
+        return ts.strftime("%b %-d at %-I:%M %p %Z")
+    return ts.strftime("%b %-d %Y at %-I:%M %p %Z")
+
+
+def summarize_status(entry: dict) -> str | None:
+    status = entry.get("status")
+    if not isinstance(status, dict):
+        return None
+    indicator = status.get("indicator")
+    description = status.get("description")
+    if not indicator and not description:
+        return None
+    label = str(indicator or "unknown").replace("_", " ").title()
+    return f"{label}: {description}" if description else label
+
+
+def summarize_pace(entry: dict) -> list[str]:
+    pace = entry.get("pace")
+    if not isinstance(pace, dict):
+        return []
+    lines: list[str] = []
+    for key, title in (("primary", "Session pace"), ("secondary", "Weekly pace")):
+        data = pace.get(key)
+        if isinstance(data, dict) and data.get("summary"):
+            lines.append(f"{title}: {data['summary']}")
+    return lines
+
+
+def summarize_provider_cost(usage: dict) -> str | None:
+    cost = usage.get("providerCost")
+    if not isinstance(cost, dict):
+        return None
+    used = cost.get("used")
+    limit = cost.get("limit")
+    currency = str(cost.get("currencyCode") or "USD")
+    period = cost.get("period") or "Budget"
+    if isinstance(used, (int, float)) and isinstance(limit, (int, float)) and limit > 0:
+        return f"{period}: {money(float(used), currency)} / {money(float(limit), currency)}"
+    if isinstance(used, (int, float)):
+        return f"{period}: {money(float(used), currency)} used"
+    return None
+
+
+def summarize_reset_credits(usage: dict) -> str | None:
+    snapshot = usage.get("codexResetCredits")
+    if not isinstance(snapshot, dict):
+        return None
+    credits = [
+        c for c in snapshot.get("credits", [])
+        if isinstance(c, dict) and c.get("status") == "available"
+    ]
+    available = snapshot.get("availableCount")
+    count = int(available) if isinstance(available, int) else len(credits)
+    expiring = sorted(
+        (c for c in credits if c.get("expires_at")),
+        key=lambda c: c.get("expires_at") or "")
+    if expiring:
+        expiry = format_datetime_label(expiring[0].get("expires_at"))
+        if expiry:
+            return f"{count} available; next expires {expiry}"
+    if count:
+        return f"{count} available; no expiry"
+    return "None available"
+
+
+def summarize_credit_limit(limit: dict | None) -> str | None:
+    if not isinstance(limit, dict):
+        return None
+    title = limit.get("title") or "Monthly credit limit"
+    used = limit.get("used")
+    cap = limit.get("limit")
+    remaining = limit.get("remaining")
+    if isinstance(used, (int, float)) and isinstance(cap, (int, float)) and cap > 0:
+        return f"{title}: {money(float(used))} / {money(float(cap))}"
+    if isinstance(remaining, (int, float)):
+        return f"{title}: {money(float(remaining))} remaining"
+    return None
+
+
+def summarize_openai_dashboard(entry: dict) -> list[str]:
+    dashboard = entry.get("openaiDashboard")
+    if not isinstance(dashboard, dict):
+        return []
+    lines: list[str] = []
+    account_plan = dashboard.get("accountPlan")
+    if account_plan:
+        lines.append(f"Plan: {account_plan}")
+    credits = dashboard.get("creditsRemaining")
+    if isinstance(credits, (int, float)):
+        lines.append(f"Dashboard credits: {money(float(credits))}")
+    limit = summarize_credit_limit(dashboard.get("codexCreditLimit"))
+    if limit:
+        lines.append(limit)
+    breakdown = dashboard.get("usageBreakdown") or dashboard.get("dailyBreakdown") or []
+    if isinstance(breakdown, list) and breakdown:
+        recent = breakdown[:7]
+        total = sum(
+            float(day.get("totalCreditsUsed", 0))
+            for day in recent
+            if isinstance(day, dict) and isinstance(day.get("totalCreditsUsed"), (int, float))
+        )
+        if total > 0:
+            lines.append(f"Recent dashboard spend: {money(total)} over {len(recent)} days")
+    return lines
+
+
+def summarize_usage_details(usage: dict) -> list[str]:
+    lines: list[str] = []
+    cost = summarize_provider_cost(usage)
+    if cost:
+        lines.append(cost)
+
+    openrouter = usage.get("openRouterUsage")
+    if isinstance(openrouter, dict):
+        balance = openrouter.get("balance")
+        total_usage = openrouter.get("totalUsage")
+        if isinstance(balance, (int, float)):
+            text = f"OpenRouter balance: {money(float(balance))}"
+            if isinstance(total_usage, (int, float)):
+                text += f" ({money(float(total_usage))} used)"
+            lines.append(text)
+
+    sakana = usage.get("sakanaPayAsYouGo")
+    if isinstance(sakana, dict):
+        balance = sakana.get("creditBalance")
+        total = sakana.get("periodUsageTotal")
+        if isinstance(balance, (int, float)):
+            text = f"Pay-as-you-go balance: {money(float(balance))}"
+            if isinstance(total, (int, float)):
+                text += f"; {money(float(total))} used"
+            lines.append(text)
+
+    openai_api = usage.get("openAIAPIUsage")
+    if isinstance(openai_api, dict):
+        daily = openai_api.get("daily")
+        if isinstance(daily, list) and daily:
+            total_cost = sum(
+                float(day.get("costUSD", 0))
+                for day in daily
+                if isinstance(day, dict) and isinstance(day.get("costUSD"), (int, float))
+            )
+            requests = sum(
+                int(day.get("requests", 0))
+                for day in daily
+                if isinstance(day, dict) and isinstance(day.get("requests"), int)
+            )
+            lines.append(f"API history: {money(total_cost)} across {requests:,} requests")
+
+    reset_credits = summarize_reset_credits(usage)
+    if reset_credits:
+        lines.append(f"Reset credits: {reset_credits}")
+
+    if usage.get("commandCodeSubscriptionEnrichmentUnavailable"):
+        lines.append("Subscription lookup unavailable")
+    if usage.get("commandCodeMonthlyGrantDepleted"):
+        lines.append("Monthly grant depleted")
+
+    expires = format_datetime_label(usage.get("subscriptionExpiresAt"))
+    renews = format_datetime_label(usage.get("subscriptionRenewsAt"))
+    if renews:
+        lines.append(f"Subscription renews {renews}")
+    elif expires:
+        lines.append(f"Subscription expires {expires}")
+    return lines
+
+
 def default_provider(data: list) -> str | None:
     """Pick the provider with the highest used% as the initial tab."""
     if not data:
         return None
     healthy = [e for e in data if not e.get("error")]
     pool = healthy or data
-    return max(pool, key=max_pct).get("provider")
+    return entry_key(max(pool, key=max_pct))
 
 
 def load_full_config() -> dict:
@@ -687,7 +951,7 @@ class CodexBarPopup(Gtk.Application):
 
     def _apply_refresh(self, new_data: list) -> bool:
         self.data = new_data
-        if self.active_pid is None or not any(e.get("provider") == self.active_pid for e in new_data):
+        if self.active_pid is None or not any(entry_key(e) == self.active_pid for e in new_data):
             self.active_pid = default_provider(new_data)
         self.render()
         return False
@@ -709,16 +973,17 @@ class CodexBarPopup(Gtk.Application):
         self.tab_buttons.clear()
         for entry in self.data:
             pid = entry.get("provider", "")
+            key = entry_key(entry)
             classes = ["codexbar-tab"]
-            if pid == self.active_pid:
+            if key == self.active_pid:
                 classes.append("active")
             pill = self._make_pill(
-                PROVIDER_NAMES.get(pid, pid.title()),
+                entry_label(entry, self.data),
                 classes,
-                lambda p=pid: self._select(p),
+                lambda k=key: self._select(k),
                 icon_pid=pid)
             self.tabbar.append(pill)
-            self.tab_buttons[pid] = pill
+            self.tab_buttons[key] = pill
         self.tabbar.append(Gtk.Box(hexpand=True))
         self.tabbar.append(self._make_pill(
             "↻", ["codexbar-iconbtn"], lambda: self.refresh(background=True)))
@@ -728,7 +993,7 @@ class CodexBarPopup(Gtk.Application):
     def _render_usage_body(self):
         if not self.data:
             return
-        active = next((e for e in self.data if e.get("provider") == self.active_pid), None)
+        active = next((e for e in self.data if entry_key(e) == self.active_pid), None)
         if active is None:
             return
         self._render_provider(active)
@@ -797,20 +1062,13 @@ class CodexBarPopup(Gtk.Application):
         scroller.set_child(list_box)
         self.body.append(scroller)
 
-        # Linux-supported first, alphabetised; then unsupported with hint.
+        # The Linux CLI's config dump is authoritative. If upstream exposes a
+        # provider there, keep it selectable here.
         provider_ids = [p.get("id") for p in cfg.get("providers", [])]
-        supported = sorted(p for p in provider_ids if p in LINUX_SUPPORTED)
-        unsupported = sorted(p for p in provider_ids if p not in LINUX_SUPPORTED)
+        supported = sorted(p for p in provider_ids if isinstance(p, str))
 
         for pid in supported:
             list_box.append(self._settings_row(pid, existing.get(pid, False), enabled_ui=True))
-
-        if unsupported:
-            divider_label = Gtk.Label(label="macOS-only providers", xalign=0.0)
-            divider_label.add_css_class("codexbar-settings-group")
-            list_box.append(divider_label)
-            for pid in unsupported:
-                list_box.append(self._settings_row(pid, existing.get(pid, False), enabled_ui=False))
 
         # Footer note.
         note = Gtk.Label(
@@ -838,9 +1096,9 @@ class CodexBarPopup(Gtk.Application):
             return chip
 
         wrap.append(make_chip(None, "Highest"))
-        enabled_pids = [pid for pid, on in existing.items() if on and pid in LINUX_SUPPORTED]
+        enabled_pids = [pid for pid, on in existing.items() if on]
         for pid in enabled_pids:
-            wrap.append(make_chip(pid, PROVIDER_NAMES.get(pid, pid.title())))
+            wrap.append(make_chip(pid, provider_label(pid)))
         return wrap
 
     def _on_bar_provider_change(self, pid: str | None):
@@ -895,7 +1153,7 @@ class CodexBarPopup(Gtk.Application):
         if icon is not None:
             row.append(icon)
 
-        name = Gtk.Label(label=PROVIDER_NAMES.get(pid, pid.title()), xalign=0.0, hexpand=True)
+        name = Gtk.Label(label=provider_label(pid), xalign=0.0, hexpand=True)
         name.add_css_class("codexbar-settings-name")
         row.append(name)
 
@@ -912,10 +1170,10 @@ class CodexBarPopup(Gtk.Application):
         self.settings_switches[pid] = switch
         return row
 
-    def _select(self, pid: str):
-        if pid == self.active_pid:
+    def _select(self, key: str):
+        if key == self.active_pid:
             return
-        self.active_pid = pid
+        self.active_pid = key
         self.render()
 
     def _render_provider(self, entry: dict):
@@ -927,7 +1185,7 @@ class CodexBarPopup(Gtk.Application):
 
         # Header row.
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        title = Gtk.Label(label=PROVIDER_NAMES.get(pid, pid.title()), xalign=0.0, hexpand=True)
+        title = Gtk.Label(label=provider_label(pid), xalign=0.0, hexpand=True)
         title.add_css_class("codexbar-provider-title")
         header.append(title)
         if login_method:
@@ -942,6 +1200,10 @@ class CodexBarPopup(Gtk.Application):
             sub_text = "Cached — last refresh failed"
         elif entry.get("error"):
             sub_text = "Refresh failed"
+        else:
+            status_text = summarize_status(entry)
+            if status_text:
+                sub_text = status_text
         sub_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         sub = Gtk.Label(label=sub_text, xalign=0.0, hexpand=True)
         sub.add_css_class("codexbar-subtitle")
@@ -973,22 +1235,67 @@ class CodexBarPopup(Gtk.Application):
             self.body.append(self._section(WINDOW_LABELS.get(key, key.title()), window))
             rendered_any = True
 
+        for item in usage.get("extraRateWindows") or []:
+            if not isinstance(item, dict):
+                continue
+            window = item.get("window")
+            if not isinstance(window, dict):
+                continue
+            self.body.append(self._divider())
+            title = item.get("title") or item.get("id") or "Extra quota"
+            self.body.append(self._section(str(title), window, usage_known=item.get("usageKnown", True)))
+            rendered_any = True
+
         # Credits (when provider exposes it).
         credits = entry.get("credits") or {}
         remaining = credits.get("remaining")
+        credit_lines = []
         if isinstance(remaining, (int, float)):
+            credit_lines.append((money(float(remaining)), "remaining"))
+        limit_line = summarize_credit_limit(credits.get("codexCreditLimit"))
+        if limit_line:
+            credit_lines.append((limit_line, ""))
+        if credit_lines:
             self.body.append(self._divider())
             credit_title = Gtk.Label(label="Credits", xalign=0.0)
             credit_title.add_css_class("codexbar-section-title")
             self.body.append(credit_title)
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            val = Gtk.Label(label=f"${remaining:,.2f}", xalign=0.0, hexpand=True)
-            val.add_css_class("codexbar-credits")
-            row.append(val)
-            lbl = Gtk.Label(label="remaining", xalign=1.0)
-            lbl.add_css_class("codexbar-credits-label")
-            row.append(lbl)
-            self.body.append(row)
+            for value, label in credit_lines:
+                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+                val = Gtk.Label(label=value, xalign=0.0, hexpand=True)
+                val.add_css_class("codexbar-credits")
+                row.append(val)
+                if label:
+                    lbl = Gtk.Label(label=label, xalign=1.0)
+                    lbl.add_css_class("codexbar-credits-label")
+                    row.append(lbl)
+                self.body.append(row)
+            rendered_any = True
+
+        detail_lines = [
+            *summarize_pace(entry),
+            *summarize_openai_dashboard(entry),
+            *summarize_usage_details(usage),
+        ]
+        plan_info = entry.get("antigravityPlanInfo")
+        if isinstance(plan_info, dict):
+            plan = (
+                plan_info.get("planDisplayName")
+                or plan_info.get("displayName")
+                or plan_info.get("planShortName")
+                or plan_info.get("planName")
+            )
+            if plan:
+                detail_lines.append(f"Plan: {plan}")
+        if detail_lines:
+            self.body.append(self._divider())
+            details_title = Gtk.Label(label="Details", xalign=0.0)
+            details_title.add_css_class("codexbar-section-title")
+            self.body.append(details_title)
+            for line in detail_lines:
+                detail = Gtk.Label(label=line, xalign=0.0, wrap=True, max_width_chars=48)
+                detail.add_css_class("codexbar-subtitle")
+                self.body.append(detail)
             rendered_any = True
 
         if not rendered_any:
@@ -1002,7 +1309,7 @@ class CodexBarPopup(Gtk.Application):
         d.add_css_class("codexbar-divider")
         return d
 
-    def _section(self, title: str, window: dict) -> Gtk.Widget:
+    def _section(self, title: str, window: dict, *, usage_known: bool = True) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         t = Gtk.Label(label=title, xalign=0.0)
         t.add_css_class("codexbar-section-title")
@@ -1022,11 +1329,15 @@ class CodexBarPopup(Gtk.Application):
         box.append(bar)
 
         details = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        left_text = (
-            f"{int(pct)}% used"
-            if isinstance(pct, (int, float))
-            else "—"
-        )
+        if not usage_known:
+            left_text = "Reset tracked"
+        elif isinstance(pct, (int, float)):
+            regen = window.get("nextRegenPercent")
+            left_text = f"{int(pct)}% used"
+            if isinstance(regen, (int, float)) and regen > 0:
+                left_text += f" · +{compact_number(regen)}% next regen"
+        else:
+            left_text = "—"
         left = Gtk.Label(label=left_text, xalign=0.0, hexpand=True)
         left.add_css_class("codexbar-section-detail-left")
         details.append(left)

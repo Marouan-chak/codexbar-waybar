@@ -33,8 +33,12 @@ compositor with Waybar + gtk4-layer-shell.
 ## Features
 
 - **Provider logos** in the tab strip and settings rows, sourced from
-  upstream CodexBar (39 brand marks). Auto-recoloured for light backgrounds;
+  upstream CodexBar (52 brand marks as of CodexBar 0.40.0). Auto-recoloured for light backgrounds;
   see [`assets/providers/NOTICE`](assets/providers/NOTICE).
+- **Current upstream payload details** — the tooltip and popover render
+  status, pace summaries, named extra quota windows, Codex reset-credit expiry
+  inventory, provider cost/budget data, OpenAI dashboard credits, and
+  provider-specific balances when the installed CLI reports them.
 - **Bar pin mode** — choose `Highest` for cross-provider max, or pin a single
   provider to show its session and weekly side by side (`🤖 5% • 1%`).
   Toggled live from the popover's Settings view, no Save needed.
@@ -158,6 +162,7 @@ definition or your shell profile.
 | --- | --- | --- |
 | `CODEXBAR_BIN` | `~/.local/bin/codexbar` | Path to the CLI binary. |
 | `CODEXBAR_STAGGER` | `0.5` | Seconds between provider fetches (raise it if Claude OAuth keeps 429-ing). |
+| `CODEXBAR_PROVIDER_TIMEOUT` | `20` | Per-provider CLI timeout in seconds. Set to `0` to disable if you prefer to let slow upstream probes run indefinitely. |
 | `CODEXBAR_PROVIDERS` | from `config.json` | Space-separated provider IDs to query, bypassing `~/.codexbar/config.json`. Set per-Waybar instance if you want different sets per monitor. |
 | `CODEXBAR_BAR_PROVIDER` | from `state.json` | Pin a specific provider's session/weekly to the bar regardless of state. Set to a provider ID, or unset for `Highest`. |
 | `CODEXBAR_ANTIGRAVITY_CREDS` | `~/.gemini/oauth_creds.json` | Path to the Antigravity Google OAuth creds (written by `agy login`) the wrapper feeds to the CLI. |

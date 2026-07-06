@@ -148,20 +148,26 @@ fetch_one() {
     local p="$1" src="$2"
     local args=(usage --provider "$p" --format json --no-color)
     [[ -n "$src" ]] && args+=(--source "$src")
+    local runner=()
+    if [[ "${PROVIDER_TIMEOUT_SECS:-20}" != "0" ]] && command -v timeout >/dev/null 2>&1; then
+        runner=(timeout "${PROVIDER_TIMEOUT_SECS:-20}")
+    fi
     if [[ "$p" == "antigravity" ]]; then
         if [[ -z "${ANTIGRAVITY_OAUTH_CREDENTIALS_JSON:-}" && -f "$ANTIGRAVITY_CREDS" ]]; then
-            CUSTOM_CA_BUNDLE="${ANTIGRAVITY_CUSTOM_CA_BUNDLE:-}" \
-            LD_PRELOAD="${ANTIGRAVITY_LD_PRELOAD:-}" \
-            ANTIGRAVITY_OAUTH_CREDENTIALS_JSON="$(cat "$ANTIGRAVITY_CREDS")" \
+            "${runner[@]}" env \
+                CUSTOM_CA_BUNDLE="${ANTIGRAVITY_CUSTOM_CA_BUNDLE:-}" \
+                LD_PRELOAD="${ANTIGRAVITY_LD_PRELOAD:-}" \
+                ANTIGRAVITY_OAUTH_CREDENTIALS_JSON="$(cat "$ANTIGRAVITY_CREDS")" \
                 "$CODEXBAR" "${args[@]}" 2>/dev/null
         else
-            CUSTOM_CA_BUNDLE="${ANTIGRAVITY_CUSTOM_CA_BUNDLE:-}" \
-            LD_PRELOAD="${ANTIGRAVITY_LD_PRELOAD:-}" \
+            "${runner[@]}" env \
+                CUSTOM_CA_BUNDLE="${ANTIGRAVITY_CUSTOM_CA_BUNDLE:-}" \
+                LD_PRELOAD="${ANTIGRAVITY_LD_PRELOAD:-}" \
                 "$CODEXBAR" "${args[@]}" 2>/dev/null
         fi
         return
     fi
-    "$CODEXBAR" "${args[@]}" 2>/dev/null
+    "${runner[@]}" "$CODEXBAR" "${args[@]}" 2>/dev/null
 }
 
 fetch_provider() {
@@ -189,6 +195,7 @@ fetch_provider() {
 
 # Sequential fetch with a small stagger between providers (avoids 429s).
 STAGGER_SECS="${CODEXBAR_STAGGER:-0.5}"
+PROVIDER_TIMEOUT_SECS="${CODEXBAR_PROVIDER_TIMEOUT:-20}"
 LAST_GOOD="$CACHE_DIR/last.json"
 
 tmpdir="$(mktemp -d)"
@@ -244,10 +251,11 @@ fi
 if [[ "$merged" != "[]" ]] && echo "$merged" | jq -e 'any(.error | not)' >/dev/null 2>&1; then
     if [[ -n "$last_good_json" ]]; then
         merged_for_cache="$(jq -c --argjson prev "$last_good_json" '
+            def cache_key: (.provider // "") + "\u0000" + (.account // "");
             ([$prev[]? | select((.error | not) and (.stale != true))
-              | {key: .provider, value: .}] | from_entries) as $ok_prev
+              | {key: cache_key, value: .}] | from_entries) as $ok_prev
             | ([.[]? | select(.error | not)
-            | {key: .provider, value: (del(.stale))}] | from_entries) as $ok_fresh
+            | {key: cache_key, value: (del(.stale))}] | from_entries) as $ok_fresh
             | ($ok_prev + $ok_fresh) | [.[]]
         ' <<< "$merged")"
         [[ -n "$merged_for_cache" ]] && echo "$merged_for_cache" > "$LAST_GOOD"
@@ -265,15 +273,24 @@ if [[ -n "$last_good_json" ]]; then
     merged="$(jq -c \
         --argjson prev "$last_good_json" \
         --argjson requested "$providers_json" '
-        ([$prev[]? | select(.error | not) | {key: .provider, value: .}] | from_entries) as $ok_prev
+        def cache_key: (.provider // "") + "\u0000" + (.account // "");
+        ([$prev[]? | select(.error | not) | {key: cache_key, value: .}] | from_entries) as $ok_prev
+        | ([$prev[]? | select(.error | not)] | group_by(.provider) | map({key: .[0].provider, value: .}) | from_entries) as $prev_by_provider
         | (map(.provider) | unique) as $seen
-        | map(if .error and $ok_prev[.provider]
-              then $ok_prev[.provider] + {stale: true}
-              else . end) as $current
+        | map(if .error and $ok_prev[cache_key]
+              then $ok_prev[cache_key] + {stale: true}
+              else . end) as $direct_current
+        | ($direct_current
+           | map(select(.error and ($ok_prev[cache_key] | not)) as $err
+                 | ($prev_by_provider[$err.provider] // [])
+                 | map(. + {stale: true}))
+           | add // []) as $provider_replacements
+        | ($direct_current | map(select((.error and ($prev_by_provider[.provider] // [] | length > 0)) | not))) as $current
         | ($requested
            | map(. as $pid | select(($seen | index($pid)) | not))
-           | map($ok_prev[.]? | select(. != null) + {stale: true})) as $missing
-        | $current + $missing
+           | map(($prev_by_provider[.] // []) | map(. + {stale: true}))
+           | add // []) as $missing
+        | $current + $provider_replacements + $missing
     ' <<< "$merged")"
 fi
 
@@ -288,10 +305,34 @@ echo "$merged" | jq -c \
     --arg reset_format "$RESET_TIME_FORMAT" '
     # Collect all usage windows across providers
     def provider_name(p):
-        {codex:"Codex", claude:"Claude", gemini:"Gemini",
-         copilot:"Copilot", openai:"OpenAI", cursor:"Cursor",
-         vertexai:"Vertex AI", openrouter:"OpenRouter",
-         antigravity:"Antigravity"}[p] // (p | ascii_upcase);
+        if p == null then "Unknown"
+        else {
+          abacus:"Abacus AI", alibaba:"Alibaba", alibabatokenplan:"Alibaba Token Plan",
+          amp:"Amp", antigravity:"Antigravity", augment:"Augment",
+          azureopenai:"Azure OpenAI", bedrock:"AWS Bedrock", chutes:"Chutes",
+          claude:"Claude", clawrouter:"ClawRouter", codebuff:"Codebuff",
+          codex:"Codex", commandcode:"Command Code", copilot:"Copilot",
+          crof:"Crof", crossmodel:"CrossModel", cursor:"Cursor",
+          deepgram:"Deepgram", deepseek:"DeepSeek", devin:"Devin",
+          doubao:"Doubao", elevenlabs:"ElevenLabs", factory:"Droid",
+          gemini:"Gemini", grok:"Grok", groq:"Groq",
+          jetbrains:"JetBrains AI", kilo:"Kilo", kimi:"Kimi",
+          kimik2:"Kimi K2", kiro:"Kiro", litellm:"LiteLLM",
+          llmproxy:"LLM Proxy", manus:"Manus", mimo:"Xiaomi MiMo",
+          minimax:"MiniMax", mistral:"Mistral", moonshot:"Moonshot / Kimi API",
+          ollama:"Ollama", openai:"OpenAI", opencode:"OpenCode",
+          opencodego:"OpenCode Go", openrouter:"OpenRouter", perplexity:"Perplexity",
+          poe:"Poe", qoder:"Qoder", sakana:"Sakana AI",
+          stepfun:"StepFun", synthetic:"Synthetic", t3chat:"T3 Chat",
+          venice:"Venice", vertexai:"Vertex AI", warp:"Warp",
+          windsurf:"Windsurf", zai:"z.ai", zed:"Zed"
+        }[p] // (p | gsub("-"; " ") | ascii_upcase)
+        end;
+
+    def entry_name(entry):
+        entry as $entry
+        | provider_name($entry.provider)
+          + (if (($entry.account // "") != "") then " (\($entry.account))" else "" end);
 
     # Insert spaces the providers omit. Claude OAuth gives "May 17 at 6:20AM"
     # (no space before AM/PM); Claude CLI gives "Resets6:20am(Europe/Paris)"
@@ -353,15 +394,98 @@ echo "$merged" | jq -c \
         else "\(name): \(w.usedPercent)%" + reset_phrase(w)
         end;
 
+    def fmt_named_window(item; provider):
+        if item == null or item.window == null then empty
+        else (item.title // item.id // "Extra quota") as $title
+             | if (item | has("usageKnown")) and item.usageKnown == false then
+                   "\(provider) \($title): reset tracked" + reset_phrase(item.window)
+               else fmt_window(item.window; "\(provider) \($title)") end
+        end;
+
+    def money(v; currency):
+        if currency == null or currency == "USD" then "$\((v * 100 | round / 100))"
+        else "\(currency) \((v * 100 | round / 100))" end;
+
+    def status_line(entry):
+        entry as $entry
+        | if $entry.status == null then empty
+        else ($entry.status.indicator // "unknown" | gsub("_"; " ") | ascii_upcase) as $indicator
+             | if ($entry.status.description // "") == "" then
+                   "\(entry_name($entry)) status: \($indicator)"
+               else
+                   "\(entry_name($entry)) status: \($indicator) — \($entry.status.description)"
+               end
+        end;
+
+    def pace_lines(entry):
+        entry as $entry
+        |
+        [
+          ($entry.pace.primary.summary? | select(. != null) | "\(entry_name($entry)) session pace: \(.)"),
+          ($entry.pace.secondary.summary? | select(. != null) | "\(entry_name($entry)) weekly pace: \(.)")
+        ];
+
+    def credits_lines(entry):
+        entry as $entry
+        |
+        [
+          ($entry.credits.remaining? | select(type == "number")
+           | "\(entry_name($entry)) credits: \(money(.; "USD")) remaining"),
+          ($entry.credits.codexCreditLimit? | select(.limit? > 0)
+           | "\(entry_name($entry)) \(.title // "Monthly credit limit"): \(money(.used; "USD")) / \(money(.limit; "USD"))"),
+          ($entry.openaiDashboard.creditsRemaining? | select(type == "number")
+           | "\(entry_name($entry)) dashboard credits: \(money(.; "USD")) remaining"),
+          ($entry.openaiDashboard.codexCreditLimit? | select(.limit? > 0)
+           | "\(entry_name($entry)) \(.title // "Monthly credit limit"): \(money(.used; "USD")) / \(money(.limit; "USD"))")
+        ];
+
+    def reset_credit_line(entry):
+        entry as $entry
+        | $entry.usage.codexResetCredits as $rc
+        | if $rc == null then empty
+          else ($rc.availableCount // ([$rc.credits[]? | select(.status == "available")] | length)) as $count
+          | ([$rc.credits[]? | select(.status == "available" and .expires_at != null)] | sort_by(.expires_at) | .[0].expires_at) as $next
+          | if $next != null then
+                (try ($next | fromdateiso8601) catch null) as $ts
+                | if $ts == null then "\(entry_name($entry)) reset credits: \($count) available"
+                  else "\(entry_name($entry)) reset credits: \($count) available; next expires \($ts | fmt_local_ts)" end
+            elif $count > 0 then "\(entry_name($entry)) reset credits: \($count) available; no expiry"
+            else "\(entry_name($entry)) reset credits: none available" end
+          end;
+
+    def cost_lines(entry):
+        entry as $entry
+        |
+        [
+          ($entry.usage.providerCost? | select(.used? != null)
+           | "\(entry_name($entry)) \(.period // "budget"): \(money(.used; .currencyCode // "USD"))"
+             + (if .limit? > 0 then " / \(money(.limit; .currencyCode // "USD"))" else "" end)),
+          ($entry.usage.openRouterUsage.balance? | select(type == "number")
+           | "\(entry_name($entry)) balance: \(money(.; "USD"))"),
+          ($entry.usage.sakanaPayAsYouGo.creditBalance? | select(type == "number")
+           | "\(entry_name($entry)) pay-as-you-go balance: \(money(.; "USD"))"),
+          ($entry.antigravityPlanInfo? | (.planDisplayName // .displayName // .planShortName // .planName) as $plan
+           | select($plan != null) | "\(entry_name($entry)) plan: \($plan)")
+        ];
+
     def provider_lines(entry):
-        if entry.error then
-            "\(provider_name(entry.provider)): error — \(entry.error.message)"
+        entry as $entry
+        | if $entry.error then
+            "\(provider_name($entry.provider)): error — \($entry.error.message)"
         else
-            [
-                fmt_window(entry.usage.primary;   "\(provider_name(entry.provider)) primary"),
-                fmt_window(entry.usage.secondary; "\(provider_name(entry.provider)) secondary"),
-                fmt_window(entry.usage.tertiary;  "\(provider_name(entry.provider)) tertiary")
-            ] | map(select(. != null)) | join("\n")
+            (entry_name($entry)) as $name
+            | [
+                status_line($entry),
+                fmt_window($entry.usage.primary;   "\($name) primary"),
+                fmt_window($entry.usage.secondary; "\($name) secondary"),
+                fmt_window($entry.usage.tertiary;  "\($name) tertiary"),
+                ($entry.usage.extraRateWindows[]? | fmt_named_window(.; $name)),
+                reset_credit_line($entry)
+            ]
+            + pace_lines($entry)
+            + credits_lines($entry)
+            + cost_lines($entry)
+            | map(select(. != null and . != "")) | join("\n")
         end;
 
     def max_pct(entry):
