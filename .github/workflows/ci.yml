@@ -29,6 +29,9 @@ jobs:
       - name: Python syntax
         run: python3 -m py_compile codexbar-popup.py
 
+      - name: Python tests
+        run: python3 -m unittest discover -s tests
+
       - name: JSONC module file parses (after stripping line comments)
         run: |
           sed -E 's@//.*$@@' codexbar.jsonc | jq -e . >/dev/null

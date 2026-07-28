@@ -737,14 +737,21 @@ def summarize_usage_details(usage: dict) -> list[str]:
     return lines
 
 
-def default_provider(data: list) -> str | None:
-    """Pick the provider with the highest used% as the initial tab."""
+def default_provider(data: list, state: dict | None = None) -> str | None:
+    """Pick the configured popup provider, or the highest used% as fallback."""
     if not data:
         return None
-    healthy = [e for e in data if not e.get("error")]
+    if state is None:
+        state = load_state()
+    preferred = state.get("popupProvider")
+    if isinstance(preferred, str) and preferred:
+        matches = [entry for entry in data if entry.get("provider") == preferred]
+        if matches:
+            healthy_matches = [entry for entry in matches if not entry.get("error")]
+            return entry_key((healthy_matches or matches)[0])
+    healthy = [entry for entry in data if not entry.get("error")]
     pool = healthy or data
     return entry_key(max(pool, key=max_pct))
-
 
 def load_full_config() -> dict:
     """Returns the canonical config (every provider known to the CLI, with the
@@ -1022,6 +1029,18 @@ class CodexBarPopup(Gtk.Application):
         bar_hint.add_css_class("codexbar-subtitle")
         self.body.append(bar_hint)
         self.body.append(self._build_bar_provider_picker(existing))
+        self.body.append(self._divider())
+
+        # --- Section: which provider is selected when the popup opens ---
+        popup_title = Gtk.Label(label="Open popup on", xalign=0.0)
+        popup_title.add_css_class("codexbar-section-title")
+        self.body.append(popup_title)
+        popup_hint = Gtk.Label(
+            label="Choose the provider tab selected when the popup opens, or use Highest.",
+            xalign=0.0, wrap=True, max_width_chars=44)
+        popup_hint.add_css_class("codexbar-subtitle")
+        self.body.append(popup_hint)
+        self.body.append(self._build_popup_provider_picker(existing))
 
         # Divider between sections.
         self.body.append(self._divider())
@@ -1077,29 +1096,39 @@ class CodexBarPopup(Gtk.Application):
         note.add_css_class("codexbar-subtitle")
         self.body.append(note)
 
-    def _build_bar_provider_picker(self, existing: dict[str, bool]) -> Gtk.Widget:
+    def _build_provider_picker(self, existing: dict[str, bool], current: str | None,
+                               on_change) -> Gtk.Widget:
         wrap = Gtk.FlowBox()
         wrap.add_css_class("codexbar-bar-picker")
         wrap.set_selection_mode(Gtk.SelectionMode.NONE)
         wrap.set_homogeneous(False)
         wrap.set_max_children_per_line(8)
-        current = load_state().get("barProvider")
 
         def make_chip(pid: str | None, label: str):
             classes = ["codexbar-tab"]
             if pid == current or (pid is None and not current):
                 classes.append("active")
-            chip = self._make_pill(
+            return self._make_pill(
                 label, classes,
-                lambda p=pid: self._on_bar_provider_change(p),
+                lambda p=pid: on_change(p),
                 icon_pid=pid)
-            return chip
 
         wrap.append(make_chip(None, "Highest"))
-        enabled_pids = [pid for pid, on in existing.items() if on]
+        enabled_pids = [pid for pid, enabled in existing.items() if enabled]
         for pid in enabled_pids:
             wrap.append(make_chip(pid, provider_label(pid)))
         return wrap
+
+    def _build_bar_provider_picker(self, existing: dict[str, bool]) -> Gtk.Widget:
+        current = load_state().get("barProvider")
+        return self._build_provider_picker(existing, current, self._on_bar_provider_change)
+
+    def _build_popup_provider_picker(self, existing: dict[str, bool]) -> Gtk.Widget:
+        enabled_pids = [pid for pid, enabled in existing.items() if enabled]
+        current = load_state().get("popupProvider")
+        if current not in enabled_pids:
+            current = None
+        return self._build_provider_picker(existing, current, self._on_popup_provider_change)
 
     def _on_bar_provider_change(self, pid: str | None):
         state = load_state()
@@ -1112,6 +1141,16 @@ class CodexBarPopup(Gtk.Application):
         self.render()
         # Nudge waybar so the bar text updates immediately.
         subprocess.Popen(["pkill", "-RTMIN+8", "waybar"])
+
+    def _on_popup_provider_change(self, pid: str | None):
+        state = load_state()
+        if pid is None:
+            state.pop("popupProvider", None)
+        else:
+            state["popupProvider"] = pid
+        save_state(state)
+        # Re-render so the active chip highlight tracks the click.
+        self.render()
 
     def _build_reset_format_picker(self) -> Gtk.Widget:
         wrap = Gtk.FlowBox()

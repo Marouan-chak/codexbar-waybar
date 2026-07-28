@@ -42,6 +42,9 @@ compositor with Waybar + gtk4-layer-shell.
 - **Bar pin mode** — choose `Highest` for cross-provider max, or pin a single
   provider to show its session and weekly side by side (`🤖 5% • 1%`).
   Toggled live from the popover's Settings view, no Save needed.
+- **Popup default provider** — choose which provider tab opens first, or keep
+  the existing `Highest` behavior. The preference is stored in
+  `~/.config/codexbar-waybar/state.json` and applies on the next popup launch.
 - **Inline Settings** — flips the popover body to a scrollable provider list
   with per-provider switches; macOS-only providers appear in their own
   greyed-out section.
@@ -144,6 +147,8 @@ Reload Waybar (`Ctrl+Alt+W` on HyDE, or `pkill waybar; waybar &`).
 - **Settings → Show in bar** picks which provider the bar pins to, or
   reverts to `Highest`. Selection writes
   `~/.config/codexbar-waybar/state.json` and signals waybar immediately.
+- **Settings → Open popup on** chooses which provider tab is selected whenever
+  the popup opens, or keeps the usage-based `Highest` default.
 - **Settings → Providers** toggles which providers feed the bar and popover.
   *Save* writes `~/.codexbar/config.json` and triggers a refresh.
 
