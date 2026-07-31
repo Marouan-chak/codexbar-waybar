@@ -41,10 +41,11 @@ provider config is the most likely culprit.
 
 ## Tests
 
-There aren't formal tests, but CI runs:
+CI runs:
 
 - `bash -n` on every shell script.
 - `python3 -m py_compile` on the popup.
+- `python3 -m unittest discover -s tests` for focused popup behavior tests.
 - `shellcheck -x` on shell scripts.
 - A `jq`-based JSONC parse on `codexbar.jsonc`.
 
@@ -53,6 +54,7 @@ Run them locally before opening a PR:
 ```bash
 bash -n codexbar.sh install.sh
 python3 -m py_compile codexbar-popup.py
+python3 -m unittest discover -s tests
 shellcheck -x codexbar.sh install.sh
 ```
 

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Configurable popup default provider.** Settings now includes an **Open
+  popup on** picker that persists a provider in
+  `~/.config/codexbar-waybar/state.json`. Selecting *Highest* preserves the
+  existing usage-based default, and unavailable providers fall back to it.
+
 ## [0.4.0] — 2026-07-06
 
 ### Added
