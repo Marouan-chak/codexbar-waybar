@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `~/.config/codexbar-waybar/state.json`. Selecting *Highest* preserves the
   existing usage-based default, and unavailable providers fall back to it.
 
+### Fixed
+- Limit rendered usage percentages to two decimal places in global Waybar text
+  and tooltips.
+
 ## [0.4.0] — 2026-07-06
 
 ### Added

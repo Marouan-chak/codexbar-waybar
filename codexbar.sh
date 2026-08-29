@@ -389,9 +389,15 @@ echo "$merged" | jq -c \
                end
         end;
 
+    def round_pct:
+        ((((. * 100) + 0.5) | floor) / 100);
+
+    def fmt_pct:
+        (round_pct | tostring);
+
     def fmt_window(w; name):
         if w == null or w.usedPercent == null then empty
-        else "\(name): \(w.usedPercent)%" + reset_phrase(w)
+        else "\(name): \(w.usedPercent | fmt_pct)%" + reset_phrase(w)
         end;
 
     def fmt_named_window(item; provider):
@@ -515,7 +521,7 @@ echo "$merged" | jq -c \
         end;
 
     . as $all
-    | ($all | map(max_pct(.)) | max // 0) as $pct
+    | ($all | map(max_pct(.)) | max // 0 | round_pct) as $pct
     | ($all | map(provider_lines(.)) | map(select(. != ""))) as $lines
     | ($all | all(.error)) as $all_errored
     | ($all | any(.stale == true)) as $any_stale
@@ -524,7 +530,7 @@ echo "$merged" | jq -c \
     | {
         text: (if $pinned != null then bar_text($pinned)
                elif $all_errored then "🤖 ⚠"
-               else "🤖 \($pct)%" end),
+               else "🤖 \($pct | tostring)%" end),
         tooltip: ($lines | join("\n")),
         class: (if $all_errored then "stale"
                 elif $pct >= 90 then "critical"
